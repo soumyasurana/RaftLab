@@ -1,0 +1,12 @@
+node_id: "node3"
+host: "node3"
+rpc_port: 50051
+http_port: 8080
+peers:
+  - "node1:50051"
+  - "node2:50051"
+  - "node4:50051"
+  - "node5:50051"
+election_timeout: 300
+heartbeat_interval: 100
+data_directory: "/data/node3"

@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package proto;
+
+option go_package = "github.com/raftlab/raftlab/proto";
+
+service RaftService {
+  rpc RequestVote(RequestVoteRequest) returns (RequestVoteResponse);
+  rpc AppendEntries(AppendEntriesRequest) returns (AppendEntriesResponse);
+}
+
+message RequestVoteRequest {
+  // TODO: add fields
+}
+
+message RequestVoteResponse {
+  // TODO: add fields
+}
+
+message AppendEntriesRequest {
+  // TODO: add fields
+}
+
+message AppendEntriesResponse {
+  // TODO: add fields
+}

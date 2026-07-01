@@ -1,224 +1,258 @@
-You are an expert Go backend architect.
+# RaftLab
 
-Create ONLY the initial project structure for a production-grade distributed systems project called **RaftLab**.
+> A production-inspired implementation of the Raft Consensus Algorithm in Go with fault injection, distributed log replication, and interactive cluster visualization.
 
-IMPORTANT:
-- Do NOT implement the Raft algorithm.
-- Do NOT write business logic.
-- Create folders, packages, configuration, protobuf definitions, Docker files, Makefile, and minimal initialization code only.
-- Every file should contain only enough code to compile or act as a placeholder.
-- Add TODO comments where future implementation belongs.
+## Overview
 
-Project Overview
-----------------
-RaftLab is an educational distributed systems project implementing the Raft Consensus Algorithm.
+RaftLab is an educational distributed systems project that implements the **Raft Consensus Algorithm** from scratch. The project demonstrates how distributed nodes achieve consensus, elect leaders, replicate logs, recover from failures, and maintain a consistent replicated state machine.
 
-Architecture:
+Rather than being a toy implementation, RaftLab is structured like a production-grade distributed system with modular packages, gRPC communication, persistent storage, configurable nodes, and a chaos testing framework.
 
-- Multiple Go nodes
-- gRPC communication
-- Protocol Buffers
-- Write Ahead Log
-- Key-Value State Machine
-- Chaos Controller
-- HTTP API
-- Web Dashboard (created later)
-- Docker Compose for local cluster
+The project is designed to deepen understanding of distributed systems concepts while showcasing backend engineering skills relevant to modern infrastructure and platform teams.
 
-The repository should be organized as a real production Go project.
+---
 
-=====================================================
-Required Folder Structure
-=====================================================
+## Features
 
-raftlab/
+### Consensus
 
-├── cmd/
-│   ├── node/
-│   │   └── main.go
-│   └── controller/
-│       └── main.go
-│
-├── internal/
-│   ├── raft/
-│   │   ├── node.go
-│   │   ├── state.go
-│   │   ├── election.go
-│   │   ├── replication.go
-│   │   ├── heartbeat.go
-│   │   ├── storage.go
-│   │   ├── transport.go
-│   │   ├── config.go
-│   │   └── errors.go
-│   │
-│   ├── rpc/
-│   │   ├── server.go
-│   │   ├── client.go
-│   │   └── interceptor.go
-│   │
-│   ├── wal/
-│   │   ├── wal.go
-│   │   ├── segment.go
-│   │   └── entry.go
-│   │
-│   ├── statemachine/
-│   │   ├── kv.go
-│   │   └── apply.go
-│   │
-│   ├── chaos/
-│   │   ├── partition.go
-│   │   ├── latency.go
-│   │   ├── kill.go
-│   │   └── controller.go
-│   │
-│   ├── api/
-│   │   ├── server.go
-│   │   ├── routes.go
-│   │   └── handlers.go
-│   │
-│   ├── config/
-│   │   └── config.go
-│   │
-│   └── logger/
-│       └── logger.go
-│
-├── proto/
-│   └── raft.proto
-│
-├── pkg/
-│   └── models/
-│       ├── log.go
-│       ├── rpc.go
-│       └── types.go
-│
-├── deployments/
-│   ├── docker-compose.yml
-│   ├── Dockerfile
-│   └── configs/
-│       ├── node1.yaml
-│       ├── node2.yaml
-│       ├── node3.yaml
-│       ├── node4.yaml
-│       └── node5.yaml
-│
-├── scripts/
-│   ├── generate_proto.sh
-│   ├── run_cluster.sh
-│   └── stop_cluster.sh
-│
-├── test/
-│   ├── integration/
-│   └── unit/
-│
-├── docs/
-│   ├── architecture.md
-│   ├── protocol.md
-│   └── roadmap.md
-│
-├── Makefile
-├── go.mod
-├── go.sum
-├── README.md
-├── .gitignore
-└── .env.example
+* Leader Election
+* Heartbeat Mechanism
+* Log Replication
+* Commit Index Management
+* State Machine Application
+* Leader Failover
+* Split Vote Recovery
+* Term Management
 
-=====================================================
-Initialization Requirements
-=====================================================
+### Distributed Communication
 
-1. Initialize Go module.
+* gRPC-based node-to-node communication
+* Protocol Buffers for RPC definitions
+* Configurable peer discovery
+* Persistent connections between cluster members
 
-2. Use latest stable Go version.
+### Persistence
 
-3. Install dependencies:
+* Write-Ahead Log (WAL)
+* Persistent log entries
+* Node recovery from disk
+* Replicated key-value state machine
 
-- grpc
-- protobuf
-- yaml
-- zerolog
-- cobra (optional)
-- uuid
+### Fault Injection
 
-4. Create minimal protobuf service:
+* Kill individual nodes
+* Pause and resume nodes
+* Simulate network partitions
+* Inject network latency
+* Simulate packet loss
 
-service RaftService
+### Observability
 
-RPCs:
+* Structured logging
+* HTTP management endpoints
+* Cluster health monitoring
+* Runtime metrics
+* Live cluster status
 
-RequestVote
-AppendEntries
+---
 
-Only message definitions.
+## Architecture
 
-No logic.
+```
+                +----------------------+
+                |   Chaos Controller   |
+                +----------+-----------+
+                           |
+     -----------------------------------------------
+     |             |            |           |       |
++---------+  +---------+  +---------+  +---------+  +---------+
+| Node 1  |  | Node 2  |  | Node 3  |  | Node 4  |  | Node 5  |
++----+----+  +----+----+  +----+----+  +----+----+  +----+----+
+     |              |             |             |            |
+     +--------------+-------------+-------------+------------+
+                    gRPC Communication Network
+```
 
-5. Configure Makefile with commands:
+Each node contains:
 
+* Raft Engine
+* gRPC Server
+* HTTP Management API
+* Write-Ahead Log
+* Replicated Key-Value Store
+
+---
+
+## Project Structure
+
+```
+cmd/
+    node/
+    controller/
+
+internal/
+    raft/
+    rpc/
+    wal/
+    statemachine/
+    chaos/
+    api/
+    config/
+    logger/
+
+pkg/
+    models/
+
+proto/
+
+deployments/
+
+scripts/
+
+docs/
+
+test/
+```
+
+---
+
+## Technology Stack
+
+| Component        | Technology       |
+| ---------------- | ---------------- |
+| Language         | Go               |
+| RPC              | gRPC             |
+| Serialization    | Protocol Buffers |
+| Logging          | Zerolog          |
+| Configuration    | YAML             |
+| Containerization | Docker           |
+| Cluster          | Docker Compose   |
+
+---
+
+## Running the Project
+
+### Clone
+
+```bash
+git clone <repository-url>
+
+cd raftlab
+```
+
+### Generate Protobuf Code
+
+```bash
 make proto
+```
+
+### Build
+
+```bash
 make build
+```
+
+### Run Local Cluster
+
+```bash
 make run
+```
+
+or
+
+```bash
+docker compose up
+```
+
+---
+
+## Available Commands
+
+```bash
+make proto
+```
+
+Generate gRPC code.
+
+```bash
+make build
+```
+
+Build all binaries.
+
+```bash
+make run
+```
+
+Start the local cluster.
+
+```bash
 make test
+```
+
+Run unit and integration tests.
+
+```bash
 make fmt
+```
+
+Format source code.
+
+```bash
 make lint
+```
+
+Run linters.
+
+```bash
 make clean
+```
 
-6. Dockerfile should compile Go binary.
+Remove generated artifacts.
 
-7. docker-compose should start:
+---
 
-node1
-node2
-node3
-node4
-node5
+## Learning Objectives
 
-with different config files.
+This project demonstrates practical implementation of:
 
-No dashboard.
+* Distributed Consensus
+* Leader Election
+* Replicated State Machines
+* Write-Ahead Logging
+* Fault Tolerance
+* Network Communication
+* Concurrent Programming
+* Failure Recovery
+* Distributed Systems Architecture
 
-8. Each node main.go should:
+---
 
-- load config
-- initialize logger
-- create raft node
-- start grpc server
-- start http server
-- block forever
+## Future Improvements
 
-Only placeholders.
+* Snapshotting and Log Compaction
+* Dynamic Cluster Membership
+* Linearizable Read Optimization
+* Persistent Metadata Store
+* Web-based Cluster Dashboard
+* Metrics and Tracing
+* Authentication and TLS
+* Benchmarking Suite
+* Kubernetes Deployment
+* Multi-Raft Support
 
-9. Create configuration structs.
+---
 
-Fields:
+## References
 
-NodeID
-Host
-RPCPort
-HTTPPort
-Peers
-ElectionTimeout
-HeartbeatInterval
-DataDirectory
+* *In Search of an Understandable Consensus Algorithm (Raft)* — Diego Ongaro & John Ousterhout
+* MIT 6.824 Distributed Systems
+* etcd
+* HashiCorp Consul
 
-10. README should include:
+---
 
-- Project overview
-- Folder explanation
-- Build instructions
-- Proto generation
-- Running cluster
-- Future roadmap
+## License
 
-=====================================================
-Code Style
-=====================================================
-
-- Clean Architecture
-- Idiomatic Go
-- Small packages
-- No unnecessary abstractions
-- No implementation beyond placeholders
-- Every package should compile
-- Include TODO comments indicating future work.
-
-Generate the complete scaffold with all files.
+This project is intended for educational and learning purposes.

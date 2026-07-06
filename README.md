@@ -4,62 +4,74 @@
 
 ## Overview
 
-RaftLab is an educational distributed systems project that implements the **Raft Consensus Algorithm** from scratch. The project demonstrates how distributed nodes achieve consensus, elect leaders, replicate logs, recover from failures, and maintain a consistent replicated state machine.
+RaftLab is an educational distributed systems project focused on implementing the **Raft Consensus Algorithm** from scratch in Go.
 
-Rather than being a toy implementation, RaftLab is structured like a production-grade distributed system with modular packages, gRPC communication, persistent storage, configurable nodes, and a chaos testing framework.
+The project aims to demonstrate how distributed nodes achieve consensus through leader election, log replication, fault tolerance, and replicated state machines while following production-inspired engineering practices.
 
-The project is designed to deepen understanding of distributed systems concepts while showcasing backend engineering skills relevant to modern infrastructure and platform teams.
+Rather than being a minimal demonstration, RaftLab is being built as a modular distributed systems laboratory featuring persistent storage, gRPC communication, fault injection, and interactive cluster visualization.
+
+Its primary goal is to deepen understanding of distributed systems while showcasing backend and infrastructure engineering.
 
 ---
 
-## Features
+## Project Status
+
+> 🚧 **Early Development**
+
+RaftLab is currently under active development.
+
+The repository currently contains the project foundation, architecture, and module organization. Core Raft functionality—including leader election, log replication, persistent storage, and fault injection—will be implemented incrementally.
+
+---
+
+## Planned Features
 
 ### Consensus
 
-* Leader Election
-* Heartbeat Mechanism
-* Log Replication
-* Commit Index Management
-* State Machine Application
-* Leader Failover
-* Split Vote Recovery
-* Term Management
+- Leader Election
+- Heartbeat Mechanism
+- Log Replication
+- Commit Index Management
+- State Machine Application
+- Leader Failover
+- Split Vote Recovery
+- Term Management
 
 ### Distributed Communication
 
-* gRPC-based node-to-node communication
-* Protocol Buffers for RPC definitions
-* Configurable peer discovery
-* Persistent connections between cluster members
+- gRPC-based node-to-node communication
+- Protocol Buffers for RPC definitions
+- Configurable peer discovery
+- Persistent peer connections
 
 ### Persistence
 
-* Write-Ahead Log (WAL)
-* Persistent log entries
-* Node recovery from disk
-* Replicated key-value state machine
+- Write-Ahead Log (WAL)
+- Persistent log storage
+- Node recovery
+- Replicated key-value state machine
 
 ### Fault Injection
 
-* Kill individual nodes
-* Pause and resume nodes
-* Simulate network partitions
-* Inject network latency
-* Simulate packet loss
+- Kill individual nodes
+- Pause and resume nodes
+- Network partitions
+- Artificial latency
+- Packet loss simulation
 
 ### Observability
 
-* Structured logging
-* HTTP management endpoints
-* Cluster health monitoring
-* Runtime metrics
-* Live cluster status
+- Structured logging
+- HTTP management API
+- Cluster health monitoring
+- Runtime metrics
+- Live cluster visualization
 
 ---
 
-## Architecture
+## Target Architecture
 
-```
+```text
                 +----------------------+
                 |   Chaos Controller   |
                 +----------+-----------+
@@ -74,19 +86,19 @@ The project is designed to deepen understanding of distributed systems concepts 
                     gRPC Communication Network
 ```
 
-Each node contains:
+Each node will contain:
 
-* Raft Engine
-* gRPC Server
-* HTTP Management API
-* Write-Ahead Log
-* Replicated Key-Value Store
+- Raft Engine
+- gRPC Server
+- HTTP Management API
+- Write-Ahead Log
+- Replicated Key-Value Store
 
 ---
 
 ## Project Structure
 
-```
+```text
 cmd/
     node/
     controller/
@@ -119,140 +131,76 @@ test/
 
 ## Technology Stack
 
-| Component        | Technology       |
-| ---------------- | ---------------- |
-| Language         | Go               |
-| RPC              | gRPC             |
-| Serialization    | Protocol Buffers |
-| Logging          | Zerolog          |
-| Configuration    | YAML             |
-| Containerization | Docker           |
-| Cluster          | Docker Compose   |
+| Component | Technology |
+|----------|------------|
+| Language | Go |
+| RPC | gRPC |
+| Serialization | Protocol Buffers |
+| Logging | Zerolog |
+| Configuration | YAML |
+| Containerization | Docker |
+| Local Cluster | Docker Compose |
 
 ---
 
-## Running the Project
+## Roadmap
 
-### Clone
+### Milestone 1
 
-```bash
-git clone <repository-url>
+- Project foundation
+- gRPC infrastructure
+- Leader election
+- Heartbeats
 
-cd raftlab
-```
+### Milestone 2
 
-### Generate Protobuf Code
+- Log replication
+- Write-Ahead Log
+- State machine
+- Crash recovery
 
-```bash
-make proto
-```
+### Milestone 3
 
-### Build
+- Fault injection
+- Network partitions
+- HTTP management API
+- Runtime metrics
 
-```bash
-make build
-```
+### Milestone 4
 
-### Run Local Cluster
-
-```bash
-make run
-```
-
-or
-
-```bash
-docker compose up
-```
-
----
-
-## Available Commands
-
-```bash
-make proto
-```
-
-Generate gRPC code.
-
-```bash
-make build
-```
-
-Build all binaries.
-
-```bash
-make run
-```
-
-Start the local cluster.
-
-```bash
-make test
-```
-
-Run unit and integration tests.
-
-```bash
-make fmt
-```
-
-Format source code.
-
-```bash
-make lint
-```
-
-Run linters.
-
-```bash
-make clean
-```
-
-Remove generated artifacts.
+- Snapshotting
+- Dynamic membership
+- Cluster visualization
+- Benchmarking
+- Kubernetes deployment
 
 ---
 
 ## Learning Objectives
 
-This project demonstrates practical implementation of:
+RaftLab explores practical implementation of:
 
-* Distributed Consensus
-* Leader Election
-* Replicated State Machines
-* Write-Ahead Logging
-* Fault Tolerance
-* Network Communication
-* Concurrent Programming
-* Failure Recovery
-* Distributed Systems Architecture
-
----
-
-## Future Improvements
-
-* Snapshotting and Log Compaction
-* Dynamic Cluster Membership
-* Linearizable Read Optimization
-* Persistent Metadata Store
-* Web-based Cluster Dashboard
-* Metrics and Tracing
-* Authentication and TLS
-* Benchmarking Suite
-* Kubernetes Deployment
-* Multi-Raft Support
+- Distributed Consensus
+- Leader Election
+- Replicated State Machines
+- Write-Ahead Logging
+- Fault Tolerance
+- Concurrent Programming
+- Network Communication
+- Failure Recovery
+- Distributed Systems Architecture
 
 ---
 
 ## References
 
-* *In Search of an Understandable Consensus Algorithm (Raft)* — Diego Ongaro & John Ousterhout
-* MIT 6.824 Distributed Systems
-* etcd
-* HashiCorp Consul
+- *In Search of an Understandable Consensus Algorithm (Raft)* — Diego Ongaro & John Ousterhout
+- MIT 6.824 Distributed Systems
+- etcd
+- HashiCorp Consul
 
 ---
 
 ## License
 
-This project is intended for educational and learning purposes.
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.

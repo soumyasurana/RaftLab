@@ -5,7 +5,6 @@ on:
     branches:
       - main
       - master
-
   pull_request:
 
 jobs:
@@ -14,7 +13,7 @@ jobs:
 
     strategy:
       matrix:
-        go-version: ["1.25"]
+        go-version: ["1.25.x"]
 
     steps:
       - name: Checkout repository
@@ -24,23 +23,13 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go-version }}
-
-      - name: Cache Go modules
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
+          cache: true
 
       - name: Download dependencies
         run: go mod download
 
       - name: Verify formatting
-        run: |
-          test -z "$(gofmt -l .)"
+        run: test -z "$(gofmt -l .)"
 
       - name: Run go vet
         run: go vet ./...

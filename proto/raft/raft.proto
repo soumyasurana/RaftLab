@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package proto;
+package raft;
 
-option go_package = "raftlab/internal/pb";
+option go_package = "github.com/raftlab/raftlab/internal/pb;pb";
 
 service RaftService {
   rpc RequestVote(RequestVoteRequest) returns (RequestVoteResponse);

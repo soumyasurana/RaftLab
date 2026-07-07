@@ -8,11 +8,11 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"raftlab/pkg/types"
+	"github.com/raftlab/raftlab/pkg/types"
 )
 
 const (
-	DefaultElectionTimeout = 300 * time.Millisecond
+	DefaultElectionTimeout  = 300 * time.Millisecond
 	DefaultHeartbeatTimeout = 100 * time.Millisecond
 )
 

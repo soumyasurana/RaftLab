@@ -15,7 +15,7 @@ type Segment struct {
 }
 
 /* Record layout:
- | Length(u32) | CRC32(u32)   | Payload      |
+| Length(u32) | CRC32(u32)   | Payload      |
 */
 
 func (s *Segment) Write(record []byte) error {

@@ -33,12 +33,13 @@ func (e Entry) ToLogEntry() types.LogEntry {
 	}
 }
 
-/* MarshalBinary serializes an entry.
- Format:
- | Index   uint64 |
- | Term    uint64 |
- | CmdLen  uint32 |
- | Command bytes  |
+/*
+MarshalBinary serializes an entry.
+Format:
+| Index   uint64 |
+| Term    uint64 |
+| CmdLen  uint32 |
+| Command bytes  |
 */
 func (e Entry) MarshalBinary() ([]byte, error) {
 	var buf bytes.Buffer

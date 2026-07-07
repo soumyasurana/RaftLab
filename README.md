@@ -33,10 +33,17 @@ Rather than implementing only the core algorithm, the project incorporates engin
 - ✅ Configuration system
 - ✅ Protocol Buffers
 - ✅ gRPC service definitions
-- 🚧 Write-Ahead Log
+- ✅ Write-Ahead Log
+- ⏳ State Machine
+- ⏳ Raft Node
+- ⏳ gRPC Transport
 - ⏳ Leader Election
+- ⏳ Heartbeats
 - ⏳ Log Replication
-- ⏳ Fault Injection
+- ⏳ Commit Index
+- ⏳ Snapshots
+- ⏳ Chaos Controller
+- ⏳ Dashboard
 
 RaftLab is currently under active development.
 

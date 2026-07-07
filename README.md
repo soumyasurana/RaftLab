@@ -1,4 +1,8 @@
 # RaftLab
+![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go)
+![License](https://img.shields.io/badge/License-MIT-green.svg)
+![Status](https://img.shields.io/badge/Status-Active%20Development-orange)
+![CI](https://github.com/soumyasurana/RaftLab/actions/workflows/ci.yml/badge.svg)
 
 > A production-inspired implementation of the Raft Consensus Algorithm in Go with fault injection, distributed log replication, and interactive cluster visualization.
 
@@ -14,13 +18,27 @@ Its primary goal is to deepen understanding of distributed systems while showcas
 
 ---
 
+## Why RaftLab?
+
+RaftLab is designed to bridge the gap between academic explanations of the Raft consensus algorithm and production-grade distributed systems.
+
+Rather than implementing only the core algorithm, the project incorporates engineering practices commonly found in real-world systems, including persistent storage, RPC communication, fault injection, observability, and modular architecture.
+
+---
+
 ## Project Status
 
-> 🚧 **Early Development**
+- ✅ Project architecture
+- ✅ Repository organization
+- ✅ Configuration system
+- ✅ Protocol Buffers
+- ✅ gRPC service definitions
+- 🚧 Write-Ahead Log
+- ⏳ Leader Election
+- ⏳ Log Replication
+- ⏳ Fault Injection
 
 RaftLab is currently under active development.
-
-The repository currently contains the project foundation, architecture, and module organization. Core Raft functionality—including leader election, log replication, persistent storage, and fault injection—will be implemented incrementally.
 
 ---
 
@@ -100,31 +118,32 @@ Each node will contain:
 
 ```text
 cmd/
-    node/
     controller/
+    node/
 
 internal/
+    api/
+    chaos/
+    config/
+    logger/
     raft/
     rpc/
     wal/
-    statemachine/
-    chaos/
-    api/
-    config/
-    logger/
 
 pkg/
-    models/
+    types/
 
 proto/
+    raft/
 
 deployments/
+    configs/
 
 scripts/
 
-docs/
+tests/
 
-test/
+docs/
 ```
 
 ---
@@ -189,6 +208,18 @@ RaftLab explores practical implementation of:
 - Network Communication
 - Failure Recovery
 - Distributed Systems Architecture
+
+---
+
+## Future Work
+
+- Snapshot installation
+- Joint consensus
+- Dynamic membership
+- Benchmarking
+- Kubernetes deployment
+- Distributed tracing
+- Prometheus metrics
 
 ---
 

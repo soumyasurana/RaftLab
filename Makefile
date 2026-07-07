@@ -1,24 +1,23 @@
-.PHONY: proto build run test fmt lint clean
+PROTO_DIR=proto/raft
 
-proto:
-	./scripts/generate_proto.sh
-
-build:
-	go build -o bin/node ./cmd/node
-	go build -o bin/controller ./cmd/controller
-
-run:
-	./scripts/run_cluster.sh
-
-test:
-	go test ./...
+generate:
+	protoc \
+		--go_out=. \
+		--go-grpc_out=. \
+		$(PROTO_DIR)/raft.proto
 
 fmt:
 	go fmt ./...
 
-lint:
-	golangci-lint run
+vet:
+	go vet ./...
 
-clean:
-	rm -rf bin/
-	./scripts/stop_cluster.sh
+test:
+	go test ./...
+
+build:
+	go build ./...
+
+lint: fmt vet test
+
+all: generate build test

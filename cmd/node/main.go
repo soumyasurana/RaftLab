@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/raftlab/raftlab/internal/config"
+	"github.com/soumyasurana/RaftLab/internal/config"
 )
 
 func main() {

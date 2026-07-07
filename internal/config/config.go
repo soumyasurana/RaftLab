@@ -8,7 +8,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/raftlab/raftlab/pkg/types"
+	"github.com/soumyasurana/RaftLab/pkg/types"
 )
 
 const (

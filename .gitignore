@@ -1,3 +1,4 @@
+# Binaries
 bin/
 *.exe
 *.exe~
@@ -6,5 +7,26 @@ bin/
 *.dylib
 *.test
 *.out
+
+# Environment
 .env
+
+# Runtime data
 data/
+logs/
+tmp/
+
+# IDE
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
+
+# Generated coverage
+coverage.out
+coverage.html
+
+# Go workspace 
+go.work
+go.work.sum

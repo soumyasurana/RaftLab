@@ -1,12 +1,26 @@
 package raft
 
-import "github.com/soumyasurana/RaftLab/internal/config"
+import (
+	"sync"
+
+	"github.com/soumyasurana/RaftLab/internal/config"
+	"github.com/soumyasurana/RaftLab/internal/statemachine"
+	"github.com/soumyasurana/RaftLab/internal/storage/wal"
+)
 
 type Node struct {
-	// TODO: add node fields
-}
+	mu sync.RWMutex
 
-func NewNode(cfg *config.Config) *Node {
-	// TODO: initialize node
-	return &Node{}
+	config *config.Config
+
+	role Role
+
+	persistent PersistentState
+	volatile   VolatileState
+
+	wal *wal.WAL
+
+	stateMachine *statemachine.KVStore
+
+	stopCh chan struct{}
 }

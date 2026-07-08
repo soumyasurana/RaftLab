@@ -8,25 +8,51 @@
 
 ## Overview
 
-RaftLab is an educational distributed systems project focused on implementing the **Raft Consensus Algorithm** from scratch in Go.
+RaftLab is an educational distributed systems project that implements the **Raft Consensus Algorithm** from scratch in Go — bridging the gap between academic explanations of Raft and the engineering practices found in production systems.
 
-The project aims to demonstrate how distributed nodes achieve consensus through leader election, log replication, fault tolerance, and replicated state machines while following production-inspired engineering practices.
-
-Rather than being a minimal demonstration, RaftLab is being built as a modular distributed systems laboratory featuring persistent storage, gRPC communication, fault injection, and interactive cluster visualization.
+Rather than a minimal demonstration, RaftLab is built as a modular distributed systems laboratory: persistent storage, gRPC communication, fault injection, and interactive cluster visualization, all developed incrementally with production-inspired practices like structured logging, observability, and modular architecture.
 
 Its primary goal is to deepen understanding of distributed systems while showcasing backend and infrastructure engineering.
 
 ---
 
-## Why RaftLab?
+## Getting Started
 
-RaftLab is designed to bridge the gap between academic explanations of the Raft consensus algorithm and production-grade distributed systems.
+> Note: RaftLab is under active development. Instructions below reflect the current state of the build; some commands will change as features land.
 
-Rather than implementing only the core algorithm, the project incorporates engineering practices commonly found in real-world systems, including persistent storage, RPC communication, fault injection, observability, and modular architecture.
+### Prerequisites
+
+- Go 1.25+
+- Docker & Docker Compose (for running a local multi-node cluster)
+- `protoc` (Protocol Buffers compiler), if regenerating gRPC code
+
+### Clone and build
+
+```bash
+git clone https://github.com/soumyasurana/RaftLab.git
+cd RaftLab
+go build ./...
+```
+
+### Run tests
+
+```bash
+go test ./...
+```
+
+### Run a local cluster
+
+```bash
+docker compose -f deployments/docker-compose.yml up
+```
+
+_(Cluster bring-up is in progress — this section will be updated with node CLI flags and a walkthrough once the Raft Node and gRPC Transport milestones are complete.)_
 
 ---
 
 ## Project Status
+
+**Legend:** ✅ Done &nbsp;·&nbsp; ⏳ In Progress
 
 - ✅ Project architecture
 - ✅ Repository organization
@@ -44,8 +70,6 @@ Rather than implementing only the core algorithm, the project incorporates engin
 - ⏳ Snapshots
 - ⏳ Chaos Controller
 - ⏳ Dashboard
-
-RaftLab is currently under active development.
 
 ---
 
@@ -96,6 +120,8 @@ RaftLab is currently under active development.
 
 ## Target Architecture
 
+### Cluster Topology
+
 ```text
                 +----------------------+
                 |   Chaos Controller   |
@@ -111,13 +137,31 @@ RaftLab is currently under active development.
                     gRPC Communication Network
 ```
 
-Each node will contain:
+### Single Node Internals
 
-- Raft Engine
-- gRPC Server
-- HTTP Management API
-- Write-Ahead Log
-- Replicated Key-Value Store
+```text
++-------------------------------------------+
+|                   Node                     |
+|                                             |
+|  +-----------+       +------------------+  |
+|  | gRPC      | <---> |  Raft Engine     |  |
+|  | Server    |       |  (Election,      |  |
+|  +-----------+       |   Replication,   |  |
+|                       |   Commit Index)  |  |
+|  +-----------+       +--------+---------+  |
+|  | HTTP Mgmt |                |            |
+|  | API       |                v            |
+|  +-----------+       +------------------+  |
+|                       | Write-Ahead Log  |  |
+|                       +--------+---------+  |
+|                                |            |
+|                                v            |
+|                       +------------------+  |
+|                       | Replicated KV    |  |
+|                       | State Machine    |  |
+|                       +------------------+  |
++-------------------------------------------+
+```
 
 ---
 
@@ -135,7 +179,9 @@ internal/
     logger/
     raft/
     rpc/
-    wal/
+    statemachine/
+    storage/
+        wal/
 
 pkg/
     types/
@@ -171,71 +217,67 @@ docs/
 
 ## Roadmap
 
-### Milestone 1
-
+### Milestone 1 — Foundation
 - Project foundation
 - gRPC infrastructure
 - Leader election
 - Heartbeats
 
-### Milestone 2
-
+### Milestone 2 — Durability
 - Log replication
 - Write-Ahead Log
 - State machine
 - Crash recovery
 
-### Milestone 3
-
+### Milestone 3 — Resilience
 - Fault injection
 - Network partitions
 - HTTP management API
 - Runtime metrics
 
-### Milestone 4
-
+### Milestone 4 — Scale & Visibility
 - Snapshotting
 - Dynamic membership
 - Cluster visualization
 - Benchmarking
 - Kubernetes deployment
 
+### Stretch Goals
+- Snapshot installation via gRPC streaming
+- Joint consensus for membership changes
+- Distributed tracing (OpenTelemetry)
+- Prometheus metrics export
+
+---
+
+## Design Decisions
+
+A few of the "why" behind early architectural choices — more will be added as the project matures.
+
+- **Why gRPC over raw TCP/JSON-RPC?** Protocol Buffers give strongly-typed, versioned RPC contracts and built-in streaming, which matters for snapshot transfer and log replication at scale.
+- **Why a Write-Ahead Log before the state machine?** Matches Raft's own durability guarantee — entries must be persisted before they're considered committed, so the WAL is the source of truth on recovery, not the in-memory state machine.
+- **Why Zerolog?** Structured, low-allocation logging that's cheap enough to leave on in hot paths like heartbeats and replication, which is important for later observability work.
+
 ---
 
 ## Learning Objectives
 
-RaftLab explores practical implementation of:
-
-- Distributed Consensus
-- Leader Election
-- Replicated State Machines
-- Write-Ahead Logging
-- Fault Tolerance
-- Concurrent Programming
-- Network Communication
-- Failure Recovery
-- Distributed Systems Architecture
-
----
-
-## Future Work
-
-- Snapshot installation
-- Joint consensus
-- Dynamic membership
-- Benchmarking
-- Kubernetes deployment
-- Distributed tracing
-- Prometheus metrics
+RaftLab is a hands-on exploration of distributed consensus, replicated state machines, write-ahead logging, and failure recovery — implemented with an emphasis on concurrent programming and network communication patterns used in real production systems.
 
 ---
 
 ## References
 
-- *In Search of an Understandable Consensus Algorithm (Raft)* — Diego Ongaro & John Ousterhout
-- MIT 6.824 Distributed Systems
-- etcd
-- HashiCorp Consul
+- [In Search of an Understandable Consensus Algorithm (Raft)](https://raft.github.io/raft.pdf) — Diego Ongaro & John Ousterhout
+- [MIT 6.824: Distributed Systems](https://pdos.csail.mit.edu/6.824/)
+- [etcd](https://github.com/etcd-io/etcd)
+- [HashiCorp Consul](https://github.com/hashicorp/consul)
+
+---
+
+## Contributing
+
+RaftLab is primarily a personal learning project, but issues, suggestions, and PRs are welcome — especially around test coverage, edge cases in the Raft protocol, or documentation improvements. Please open an issue before submitting large changes so we can discuss approach first.
 
 ---
 

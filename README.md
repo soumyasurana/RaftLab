@@ -34,7 +34,7 @@ Rather than implementing only the core algorithm, the project incorporates engin
 - ✅ Protocol Buffers
 - ✅ gRPC service definitions
 - ✅ Write-Ahead Log
-- ⏳ State Machine
+- ✅ State Machine
 - ⏳ Raft Node
 - ⏳ gRPC Transport
 - ⏳ Leader Election

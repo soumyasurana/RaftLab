@@ -4,15 +4,16 @@ import "fmt"
 
 // Apply applies a replicated command.
 func (kv *KVStore) Apply(cmd Command) error {
+
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 
 	switch cmd.Operation {
 
-	case Set:
+	case OpSet:
 		kv.data[cmd.Key] = cmd.Value
 
-	case Delete:
+	case OpDelete:
 		delete(kv.data, cmd.Key)
 
 	default:

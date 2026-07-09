@@ -132,65 +132,81 @@ _(Cluster bring-up is in progress — this section will be updated with node CLI
 
 ### Cluster Topology
 
-                +----------------------+
-                |   Chaos Controller   |
-                +----------+-----------+
-                           |
-     -----------------------------------------------
-     |             |            |           |       |
-+---------+  +---------+  +---------+  +---------+  +---------+
-| Node 1  |  | Node 2  |  | Node 3  |  | Node 4  |  | Node 5  |
-+----+----+  +----+----+  +----+----+  +----+----+  +----+----+
-     |              |             |             |            |
-     +--------------+-------------+-------------+------------+
-                    gRPC Communication Network
+```text
+                           +----------------------+
+                           |   Chaos Controller   |
+                           +----------+-----------+
+                                      |
+          +---------------------------+---------------------------+
+          |              |              |              |          |
+     +----+----+    +----+----+    +----+----+    +----+----+    +----+----+
+     | Node 1  |    | Node 2  |    | Node 3  |    | Node 4  |    | Node 5  |
+     +----+----+    +----+----+    +----+----+    +----+----+    +----+----+
+          |              |              |              |              |
+          +--------------+--------------+--------------+--------------+
+                         gRPC Consensus Network
+```
 
-Each node participates independently in leader election, log replication, commitment, and state-machine application. The chaos controller injects failures such as node termination, artificial latency, and network partitions.
+Each node independently participates in leader election, log replication, commitment, and deterministic state-machine application. Nodes communicate through the gRPC consensus network using Protocol Buffers.
+
+The chaos controller injects controlled failures—including node termination, artificial network latency, packet loss, and network partitions—to demonstrate Raft's fault-tolerance and recovery behavior.
 
 ### Single-Node Internals
 
-+----------------------------------------------------------------+
-|                           Raft Node                            |
-|                                                                |
-|  Internal Consensus Traffic        External Management Traffic |
-|                                                                |
-|  +----------------------+          +-------------------------+  |
-|  |     gRPC Server      |          |   Fiber Management API  |  |
-|  |                      |          |                         |  |
-|  |  RequestVote         |          |  Health                 |  |
-|  |  AppendEntries       |          |  Node State             |  |
-|  |                      |          |  Cluster State          |  |
-|  +----------+-----------+          |  Chaos Operations       |  |
-|             |                      +------------+------------+  |
-|             |                                   |               |
-|             +----------------+------------------+               |
-|                              |                                  |
-|                              v                                  |
-|               +-----------------------------+                   |
-|               |         Raft Engine         |                   |
-|               |                             |                   |
-|               |  Leader Election            |                   |
-|               |  Term and Vote Management   |                   |
-|               |  Heartbeats                 |                   |
-|               |  Log Replication            |                   |
-|               |  Commit Index Management    |                   |
-|               |  State Transitions          |                   |
-|               +----------+------------------+                   |
-|                          |                                      |
-|              +-----------+-----------+                          |
-|              |                       |                          |
-|              v                       v                          |
-|  +----------------------+  +----------------------+             |
-|  |   Write-Ahead Log    |  | Replicated KV Store  |             |
-|  |                      |  |                      |             |
-|  |  Persistent Entries  |  |  Applied Commands    |             |
-|  |  Checksums            |  |  Deterministic State |             |
-|  |  Crash Recovery       |  |  Thread-Safe Reads   |             |
-|  +----------------------+  +----------------------+             |
-+----------------------------------------------------------------+
+```text
++------------------------------------------------------------------+
+|                            Raft Node                             |
+|                                                                  |
+|  Internal Consensus Traffic         External Management Traffic   |
+|                                                                  |
+|  +----------------------+           +--------------------------+  |
+|  |     gRPC Server      |           |   Fiber Management API   |  |
+|  |                      |           |                          |  |
+|  |  RequestVote         |           |  Health                  |  |
+|  |  AppendEntries       |           |  Node State              |  |
+|  |  InstallSnapshot*    |           |  Cluster State           |  |
+|  +----------+-----------+           |  Chaos Operations        |  |
+|             |                       +------------+-------------+  |
+|             |                                    |                |
+|             +-----------------+------------------+                |
+|                               |                                   |
+|                               v                                   |
+|                +-----------------------------+                    |
+|                |         Raft Engine         |                    |
+|                |                             |                    |
+|                |  Leader Election            |                    |
+|                |  Term and Vote Management   |                    |
+|                |  Heartbeats                 |                    |
+|                |  Log Replication            |                    |
+|                |  Commit Index Management    |                    |
+|                |  State Transitions          |                    |
+|                +-------------+---------------+                    |
+|                              |                                    |
+|                 +------------+------------+                       |
+|                 |                         |                       |
+|                 v                         v                       |
+|  +---------------------------+  +---------------------------+     |
+|  |      Write-Ahead Log      |  |    Replicated KV Store    |     |
+|  |                           |  |                           |     |
+|  |  Persistent Log Entries   |  |  Applied Commands         |     |
+|  |  CRC32 Checksums          |  |  Deterministic State      |     |
+|  |  Crash Recovery           |  |  Thread-Safe Reads        |     |
+|  +---------------------------+  +---------------------------+     |
++------------------------------------------------------------------+
+```
 
-The Raft engine persists accepted log entries to the Write-Ahead Log. After an entry is replicated to a quorum and committed, the engine applies it to the replicated key-value state machine. The WAL and state machine therefore serve different responsibilities: the WAL provides durability and recovery, while the state machine represents the committed application state.
+`* InstallSnapshot is planned for the snapshotting milestone.`
 
+The Raft engine coordinates consensus and owns the application pipeline. Accepted log entries are first persisted to the Write-Ahead Log. The leader then replicates those entries to follower nodes. After an entry is acknowledged by a quorum, the Raft engine advances the commit index and applies the committed entry to the replicated key-value state machine.
+
+The Write-Ahead Log and state machine serve separate responsibilities:
+
+* The **Write-Ahead Log** stores ordered Raft log entries durably and supports integrity verification and crash recovery.
+* The **replicated key-value state machine** applies committed commands deterministically and represents the node's current application state.
+
+The state machine is updated only after entries are committed. Persisting an entry to the WAL does not, by itself, make the entry committed or eligible for application.
+
+---
 
 ## Project Structure
 

@@ -59,17 +59,27 @@ _(Cluster bring-up is in progress — this section will be updated with node CLI
 - ✅ Configuration system
 - ✅ Protocol Buffers
 - ✅ gRPC service definitions
+- ✅ Generated protobuf bindings
 - ✅ Write-Ahead Log
-- ✅ State Machine
-- ⏳ Raft Node
-- ⏳ gRPC Transport
-- ⏳ Leader Election
-- ⏳ Heartbeats
-- ⏳ Log Replication
-- ⏳ Commit Index
-- ⏳ Snapshots
-- ⏳ Chaos Controller
-- ⏳ Dashboard
+- ✅ Deterministic key-value state machine
+- ⏳ Raft node lifecycle
+- ✅ gRPC transport
+- ✅ Initial RequestVote handling
+- ⏳ AppendEntries handling
+- ⬜ Election timers
+- ⬜ Leader election
+- ⬜ Heartbeats
+- ⬜ Log replication
+- ⬜ Commit index advancement
+- ⬜ State-machine application pipeline
+- ⬜ Persistent term and vote metadata
+- ⬜ Crash recovery
+- ⬜ Log conflict resolution
+- ⬜ Snapshots
+- ⬜ Chaos controller
+- ⬜ Fiber management API
+- ⬜ WebSocket event stream
+- ⬜ Next.js dashboard
 
 ---
 
@@ -122,7 +132,6 @@ _(Cluster bring-up is in progress — this section will be updated with node CLI
 
 ### Cluster Topology
 
-```text
                 +----------------------+
                 |   Chaos Controller   |
                 +----------+-----------+
@@ -135,35 +144,53 @@ _(Cluster bring-up is in progress — this section will be updated with node CLI
      |              |             |             |            |
      +--------------+-------------+-------------+------------+
                     gRPC Communication Network
-```
 
-### Single Node Internals
+Each node participates independently in leader election, log replication, commitment, and state-machine application. The chaos controller injects failures such as node termination, artificial latency, and network partitions.
 
-```text
-+-------------------------------------------+
-|                   Node                     |
-|                                             |
-|  +-----------+       +------------------+  |
-|  | gRPC      | <---> |  Raft Engine     |  |
-|  | Server    |       |  (Election,      |  |
-|  +-----------+       |   Replication,   |  |
-|                       |   Commit Index)  |  |
-|  +-----------+       +--------+---------+  |
-|  | HTTP Mgmt |                |            |
-|  | API       |                v            |
-|  +-----------+       +------------------+  |
-|                       | Write-Ahead Log  |  |
-|                       +--------+---------+  |
-|                                |            |
-|                                v            |
-|                       +------------------+  |
-|                       | Replicated KV    |  |
-|                       | State Machine    |  |
-|                       +------------------+  |
-+-------------------------------------------+
-```
+### Single-Node Internals
 
----
++----------------------------------------------------------------+
+|                           Raft Node                            |
+|                                                                |
+|  Internal Consensus Traffic        External Management Traffic |
+|                                                                |
+|  +----------------------+          +-------------------------+  |
+|  |     gRPC Server      |          |   Fiber Management API  |  |
+|  |                      |          |                         |  |
+|  |  RequestVote         |          |  Health                 |  |
+|  |  AppendEntries       |          |  Node State             |  |
+|  |                      |          |  Cluster State          |  |
+|  +----------+-----------+          |  Chaos Operations       |  |
+|             |                      +------------+------------+  |
+|             |                                   |               |
+|             +----------------+------------------+               |
+|                              |                                  |
+|                              v                                  |
+|               +-----------------------------+                   |
+|               |         Raft Engine         |                   |
+|               |                             |                   |
+|               |  Leader Election            |                   |
+|               |  Term and Vote Management   |                   |
+|               |  Heartbeats                 |                   |
+|               |  Log Replication            |                   |
+|               |  Commit Index Management    |                   |
+|               |  State Transitions          |                   |
+|               +----------+------------------+                   |
+|                          |                                      |
+|              +-----------+-----------+                          |
+|              |                       |                          |
+|              v                       v                          |
+|  +----------------------+  +----------------------+             |
+|  |   Write-Ahead Log    |  | Replicated KV Store  |             |
+|  |                      |  |                      |             |
+|  |  Persistent Entries  |  |  Applied Commands    |             |
+|  |  Checksums            |  |  Deterministic State |             |
+|  |  Crash Recovery       |  |  Thread-Safe Reads   |             |
+|  +----------------------+  +----------------------+             |
++----------------------------------------------------------------+
+
+The Raft engine persists accepted log entries to the Write-Ahead Log. After an entry is replicated to a quorum and committed, the engine applies it to the replicated key-value state machine. The WAL and state machine therefore serve different responsibilities: the WAL provides durability and recovery, while the state machine represents the committed application state.
+
 
 ## Project Structure
 
@@ -203,15 +230,20 @@ docs/
 
 ## Technology Stack
 
-| Component | Technology |
-|----------|------------|
-| Language | Go |
-| RPC | gRPC |
-| Serialization | Protocol Buffers |
-| Logging | Zerolog |
-| Configuration | YAML |
-| Containerization | Docker |
-| Local Cluster | Docker Compose |
+| Component          | Technology                |
+| ------------------ | ------------------------- |
+| Language           | Go                        |
+| Consensus RPC      | gRPC                      |
+| Serialization      | Protocol Buffers          |
+| Management API     | Fiber                     |
+| Real-Time Updates  | WebSockets                |
+| Logging            | Zerolog                   |
+| Configuration      | YAML                      |
+| Persistent Storage | Custom Write-Ahead Log    |
+| State Machine      | In-Memory Key-Value Store |
+| Dashboard          | Next.js                   |
+| Containerization   | Docker                    |
+| Local Cluster      | Docker Compose            |
 
 ---
 

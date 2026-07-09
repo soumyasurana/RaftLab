@@ -2,6 +2,7 @@ package raft
 
 import (
 	"context"
+	"log"
 	"sync"
 	"time"
 
@@ -25,8 +26,14 @@ func (n *Node) handleElectionTimeout() {
 	n.persistent.VotedFor = n.config.Node.ID
 
 	electionTerm := n.persistent.CurrentTerm
+	log.Printf(
+		"node=%s started election term=%d",
+		n.config.Node.ID,
+		electionTerm,
+	)
 
 	lastLogIndex, lastLogTerm, err := n.lastLogInfoLocked()
+
 	if err != nil {
 		n.mu.Unlock()
 		return
@@ -80,6 +87,14 @@ func (n *Node) handleElectionTimeout() {
 				},
 			)
 			if err != nil {
+				log.Printf(
+					"node=%s vote request failed peer=%s term=%d error=%v",
+					n.config.Node.ID,
+					peer.ID,
+					electionTerm,
+					err,
+				)
+
 				return
 			}
 
@@ -105,6 +120,12 @@ func (n *Node) handleElectionTimeout() {
 			if !response.VoteGranted {
 				return
 			}
+			log.Printf(
+				"node=%s received vote peer=%s term=%d",
+				n.config.Node.ID,
+				peer.ID,
+				electionTerm,
+			)
 
 			votesMu.Lock()
 			votes++
@@ -134,6 +155,12 @@ func (n *Node) becomeLeader(electionTerm uint64) {
 	}
 
 	n.role = Leader
+
+	log.Printf(
+		"node=%s became leader term=%d",
+		n.config.Node.ID,
+		electionTerm,
+	)
 
 	// Heartbeat scheduling and leader replication state added next.
 }

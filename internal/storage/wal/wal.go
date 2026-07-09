@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"io"
 	"os"
-
+	"path/filepath"
 	"github.com/soumyasurana/RaftLab/pkg/types"
 )
 
@@ -14,13 +14,18 @@ type WAL struct {
 
 // Open creates or opens a WAL file.
 func Open(path string) (*WAL, error) {
+	if err := os.MkdirAll(
+		filepath.Dir(path),
+		0755,
+	); err != nil {
+		return nil, err
+	}
 
 	file, err := os.OpenFile(
 		path,
 		os.O_CREATE|os.O_RDWR|os.O_APPEND,
 		0644,
 	)
-
 	if err != nil {
 		return nil, err
 	}

@@ -1,12 +1,19 @@
-node_id: "node4"
-host: "node4"
-rpc_port: 50051
-http_port: 8080
+id: node4
+address: localhost:50054
+data_dir: ./data/node4
+
+election_timeout: 300ms
+heartbeat_timeout: 100ms
+
 peers:
-  - "node1:50051"
-  - "node2:50051"
-  - "node3:50051"
-  - "node5:50051"
-election_timeout: 300
-heartbeat_interval: 100
-data_directory: "/data/node4"
+  - id: node1
+    address: localhost:50051
+
+  - id: node2
+    address: localhost:50052
+
+  - id: node3
+    address: localhost:50053
+
+  - id: node5
+    address: localhost:50055

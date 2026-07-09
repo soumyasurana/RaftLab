@@ -2,10 +2,10 @@ package wal
 
 import (
 	"encoding/binary"
+	"github.com/soumyasurana/RaftLab/pkg/types"
 	"io"
 	"os"
 	"path/filepath"
-	"github.com/soumyasurana/RaftLab/pkg/types"
 )
 
 type WAL struct {

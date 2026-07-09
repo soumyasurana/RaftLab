@@ -66,8 +66,8 @@ _(Cluster bring-up is in progress — this section will be updated with node CLI
 - ✅ gRPC transport
 - ✅ Initial RequestVote handling
 - ⏳ AppendEntries handling
-- ⬜ Election timers
-- ⬜ Leader election
+- ✅ Election timers
+- ✅ Initial Leader election
 - ⬜ Heartbeats
 - ⬜ Log replication
 - ⬜ Commit index advancement

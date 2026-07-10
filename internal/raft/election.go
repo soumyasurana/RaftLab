@@ -155,6 +155,12 @@ func (n *Node) becomeLeader(electionTerm uint64) {
 	}
 
 	n.role = Leader
+	lastIndex, _, err := n.lastLogInfoLocked()
+	if err != nil {
+		return
+	}
+
+	n.initializeLeaderState(lastIndex)
 
 	log.Printf(
 		"node=%s became leader term=%d",

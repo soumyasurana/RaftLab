@@ -1,12 +1,9 @@
 package raft
 
 import (
-	"context"
+	"github.com/soumyasurana/RaftLab/pkg/types"
 	"sync"
 	"time"
-
-	pb "github.com/soumyasurana/RaftLab/internal/pb/raft"
-	"github.com/soumyasurana/RaftLab/pkg/types"
 )
 
 type heartbeatManager struct {
@@ -32,9 +29,7 @@ func (h *heartbeatManager) stop() {
 
 // run continuously sends heartbeats while the node remains leader.
 func (n *Node) runHeartbeats() {
-	ticker := time.NewTicker(
-		n.heartbeat.interval,
-	)
+	ticker := time.NewTicker(n.heartbeat.interval)
 	defer ticker.Stop()
 
 	for {
@@ -48,8 +43,6 @@ func (n *Node) runHeartbeats() {
 				n.mu.RUnlock()
 				return
 			}
-
-			term := n.persistent.CurrentTerm
 
 			peers := append(
 				[]types.Peer(nil),
@@ -68,36 +61,7 @@ func (n *Node) runHeartbeats() {
 				go func() {
 					defer wg.Done()
 
-					ctx, cancel := context.WithTimeout(
-						context.Background(),
-						200*time.Millisecond,
-					)
-					defer cancel()
-
-					response, err := n.rpcClient.AppendEntries(
-						ctx,
-						string(peer.ID),
-						&pb.AppendEntriesRequest{
-							Term:         term,
-							LeaderId:     string(n.config.Node.ID),
-							LeaderCommit: n.volatile.CommitIndex,
-						},
-					)
-
-					if err != nil {
-						return
-					}
-
-					if response.Term > term {
-
-						n.mu.Lock()
-
-						if response.Term > n.persistent.CurrentTerm {
-							n.becomeFollowerLocked(response.Term)
-						}
-
-						n.mu.Unlock()
-					}
+					n.replicateToPeer(string(peer.ID))
 				}()
 			}
 

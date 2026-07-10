@@ -25,3 +25,7 @@ type Node struct {
 
 	stopCh chan struct{}
 }
+
+func (n *Node) VolatileState() {
+	panic("unimplemented")
+}

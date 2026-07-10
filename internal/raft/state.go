@@ -33,4 +33,7 @@ type PersistentState struct {
 type VolatileState struct {
 	CommitIndex uint64
 	LastApplied uint64
+	// Leader state (reinitialized after election)
+	NextIndex  map[types.NodeID]uint64
+	MatchIndex map[types.NodeID]uint64
 }

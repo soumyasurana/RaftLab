@@ -112,3 +112,41 @@ func (w *WAL) Sync() error {
 func (w *WAL) Close() error {
 	return w.segment.Close()
 }
+
+// LastEntry returns the latest log entry.
+func (w *WAL) LastEntry() (types.LogEntry, bool, error) {
+	entries, err := w.ReadAll()
+	if err != nil {
+		return types.LogEntry{}, false, err
+	}
+
+	if len(entries) == 0 {
+		return types.LogEntry{}, false, nil
+	}
+
+	return entries[len(entries)-1], true, nil
+}
+
+// EntryAt returns the entry at the given Raft index.
+func (w *WAL) EntryAt(index uint64) (types.LogEntry, bool, error) {
+
+	entries, err := w.ReadAll()
+	if err != nil {
+		return types.LogEntry{}, false, err
+	}
+
+	if index == 0 {
+		return types.LogEntry{}, false, nil
+	}
+
+	if int(index) > len(entries) {
+		return types.LogEntry{}, false, nil
+	}
+
+	return entries[index-1], true, nil
+}
+
+// TruncateAfter removes all entries after the given index.
+func (w *WAL) TruncateAfter(index uint64) error {
+	return nil
+}

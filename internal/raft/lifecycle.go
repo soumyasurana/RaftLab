@@ -33,6 +33,9 @@ func New(cfg *config.Config) (*Node, error) {
 		role: Follower,
 
 		wal: log,
+		heartbeat: newHeartbeatManager(
+			cfg.Node.HeartbeatTimeout,
+		),
 
 		stateMachine: statemachine.New(),
 

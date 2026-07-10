@@ -61,42 +61,81 @@ func (n *Node) HandleAppendEntries(
 	_ context.Context,
 	req *pb.AppendEntriesRequest,
 ) (*pb.AppendEntriesResponse, error) {
-	n.mu.Lock()
-	defer n.mu.Unlock()
 
-	// Reject the leaders from an older term.
+	n.mu.Lock()
+
+	// Reject stale leaders.
 	if req.Term < n.persistent.CurrentTerm {
-		return &pb.AppendEntriesResponse{
+
+		response := &pb.AppendEntriesResponse{
 			Term:    n.persistent.CurrentTerm,
 			Success: false,
-		}, nil
+		}
+
+		n.mu.Unlock()
+
+		return response, nil
 	}
 
-	// a valid AppendEntries request here means this node recognizes the sender as the leader for the current term.
+	// Update term / become follower.
 	if req.Term > n.persistent.CurrentTerm {
 		n.becomeFollowerLocked(req.Term)
 	} else if n.role != Follower {
 		n.role = Follower
 	}
 
-	/*
-		Later:
-		1. Reset the election timer.
-		2. Verify PrevLogIndex and PrevLogTerm.
-		3. Remove conflicting entries.
-		4. Append new entries to the WAL.
-		5. Advance CommitIndex.
-		6. Apply committed entries to the state machine.
-	*/
-	return &pb.AppendEntriesResponse{
+	// Verify PrevLogIndex exists.
+	if req.PrevLogIndex > 0 {
+
+		entry, ok, err := n.wal.EntryAt(req.PrevLogIndex)
+		if err != nil {
+			n.mu.Unlock()
+			return nil, err
+		}
+
+		if !ok {
+
+			response := &pb.AppendEntriesResponse{
+				Term:    n.persistent.CurrentTerm,
+				Success: false,
+			}
+
+			n.mu.Unlock()
+
+			return response, nil
+		}
+
+		// Verify PrevLogTerm.
+		if uint64(entry.Term) != req.PrevLogTerm {
+
+			response := &pb.AppendEntriesResponse{
+				Term:    n.persistent.CurrentTerm,
+				Success: false,
+			}
+
+			n.mu.Unlock()
+
+			return response, nil
+		}
+	}
+	response := &pb.AppendEntriesResponse{
 		Term:    n.persistent.CurrentTerm,
 		Success: true,
-	}, nil
+	}
+
+	n.mu.Unlock()
+
+	n.electionTimer.reset()
+
+	return response, nil
 }
 
 // becomeFollowerLocked transitions the node to follower state.
 // The caller must hold n.mu.
 func (n *Node) becomeFollowerLocked(term uint64) {
+	if n.heartbeat != nil {
+		n.heartbeat.stop()
+	}
 	n.role = Follower
 	n.persistent.CurrentTerm = term
 	n.persistent.VotedFor = ""
@@ -109,16 +148,16 @@ func (n *Node) lastLogInfoLocked() (
 	lastTerm uint64,
 	err error,
 ) {
-	entries, err := n.wal.ReadAll()
+	entry, ok, err := n.wal.LastEntry()
 	if err != nil {
 		return 0, 0, err
 	}
 
-	if len(entries) == 0 {
+	if !ok {
 		return 0, 0, nil
 	}
 
-	lastEntry := entries[len(entries)-1]
-
-	return uint64(lastEntry.Index), uint64(lastEntry.Term), nil
+	return uint64(entry.Index),
+		uint64(entry.Term),
+		nil
 }

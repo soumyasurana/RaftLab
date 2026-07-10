@@ -68,7 +68,7 @@ _(Cluster bring-up is in progress — this section will be updated with node CLI
 - ⏳ AppendEntries handling
 - ✅ Election timers
 - ✅ Initial Leader election
-- ⬜ Heartbeats
+- ✅ Heartbeats
 - ⬜ Log replication
 - ⬜ Commit index advancement
 - ⬜ State-machine application pipeline

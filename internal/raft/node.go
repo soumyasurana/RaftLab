@@ -15,9 +15,9 @@ type Node struct {
 	config        *config.Config
 	electionTimer *electionTimer
 	role          Role
-
-	persistent PersistentState
-	volatile   VolatileState
+	heartbeat     *heartbeatManager
+	persistent    PersistentState
+	volatile      VolatileState
 
 	wal *wal.WAL
 

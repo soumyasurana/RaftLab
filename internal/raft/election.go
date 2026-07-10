@@ -161,6 +161,11 @@ func (n *Node) becomeLeader(electionTerm uint64) {
 		n.config.Node.ID,
 		electionTerm,
 	)
+	n.heartbeat = newHeartbeatManager(
+		n.config.Node.HeartbeatTimeout,
+	)
+
+	go n.runHeartbeats()
 
 	// Heartbeat scheduling and leader replication state added next.
 }

@@ -1,0 +1,21 @@
+id: node2
+
+address: node2:50051
+
+data_dir: /app/data/node2
+
+election_timeout: 350ms
+heartbeat_timeout: 100ms
+
+peers:
+  - id: node1
+    address: node1:50051
+
+  - id: node3
+    address: node3:50051
+
+  - id: node4
+    address: node4:50051
+
+  - id: node5
+    address: node5:50051

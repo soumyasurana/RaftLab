@@ -57,10 +57,9 @@ func (w *WAL) Append(entry types.LogEntry) error {
 	return w.segment.Sync()
 }
 
-// ReadAll loads every entry from disk.
-func (w *WAL) ReadAll() ([]types.LogEntry, error) {
-	w.segment.mu.Lock()
-	defer w.segment.mu.Unlock()
+// readAllLocked loads every entry from disk.
+// The caller must hold w.segment.mu.
+func (w *WAL) readAllLocked() ([]types.LogEntry, error) {
 
 	if _, err := w.segment.file.Seek(0, io.SeekStart); err != nil {
 		return nil, err
@@ -69,23 +68,37 @@ func (w *WAL) ReadAll() ([]types.LogEntry, error) {
 	var entries []types.LogEntry
 
 	for {
+
 		var length uint32
 		var crc uint32
 
-		if err := binary.Read(w.segment.file, binary.BigEndian, &length); err != nil {
+		if err := binary.Read(
+			w.segment.file,
+			binary.BigEndian,
+			&length,
+		); err != nil {
+
 			if err == io.EOF {
 				break
 			}
+
 			return nil, err
 		}
 
-		if err := binary.Read(w.segment.file, binary.BigEndian, &crc); err != nil {
+		if err := binary.Read(
+			w.segment.file,
+			binary.BigEndian,
+			&crc,
+		); err != nil {
 			return nil, err
 		}
 
 		payload := make([]byte, length)
 
-		if _, err := io.ReadFull(w.segment.file, payload); err != nil {
+		if _, err := io.ReadFull(
+			w.segment.file,
+			payload,
+		); err != nil {
 			return nil, err
 		}
 
@@ -103,6 +116,14 @@ func (w *WAL) ReadAll() ([]types.LogEntry, error) {
 	}
 
 	return entries, nil
+}
+
+// ReadAll loads every entry from disk.
+func (w *WAL) ReadAll() ([]types.LogEntry, error) {
+	w.segment.mu.Lock()
+	defer w.segment.mu.Unlock()
+
+	return w.readAllLocked()
 }
 
 func (w *WAL) Sync() error {
@@ -146,7 +167,87 @@ func (w *WAL) EntryAt(index uint64) (types.LogEntry, bool, error) {
 	return entries[index-1], true, nil
 }
 
+// EntriesFrom returns every entry starting from index.
+func (w *WAL) EntriesFrom(index uint64) ([]types.LogEntry, error) {
+
+	entries, err := w.ReadAll()
+	if err != nil {
+		return nil, err
+	}
+
+	if index == 0 {
+		return entries, nil
+	}
+
+	if int(index) > len(entries) {
+		return []types.LogEntry{}, nil
+	}
+
+	return entries[index-1:], nil
+}
+
 // TruncateAfter removes all entries after the given index.
 func (w *WAL) TruncateAfter(index uint64) error {
+
+	w.segment.mu.Lock()
+	defer w.segment.mu.Unlock()
+
+	entries, err := w.readAllLocked()
+	if err != nil {
+		return err
+	}
+
+	var retained []types.LogEntry
+
+	for _, entry := range entries {
+
+		if uint64(entry.Index) <= index {
+			retained = append(retained, entry)
+		}
+	}
+
+	if err := w.segment.file.Close(); err != nil {
+		return err
+	}
+
+	file, err := os.OpenFile(
+		w.segment.path,
+		os.O_CREATE|
+			os.O_RDWR|
+			os.O_TRUNC|
+			os.O_APPEND,
+		0644,
+	)
+	if err != nil {
+		return err
+	}
+
+	w.segment.file = file
+
+	for _, entry := range retained {
+
+		record := FromLogEntry(entry)
+
+		data, err := record.MarshalBinary()
+		if err != nil {
+			return err
+		}
+
+		if err := w.segment.Write(data); err != nil {
+			return err
+		}
+	}
+
+	return w.segment.Sync()
+}
+
+// AppendEntries appends multiple log entries atomically.
+func (w *WAL) AppendEntries(entries []types.LogEntry) error {
+	for _, entry := range entries {
+		if err := w.Append(entry); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }

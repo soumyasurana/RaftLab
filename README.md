@@ -69,12 +69,12 @@ _(Cluster bring-up is in progress — this section will be updated with node CLI
 - ✅ Election timers
 - ✅ Initial Leader election
 - ✅ Heartbeats
-- ⏳ Log replication
+- ✅ Log replication
+- ✅ Log conflict resolution
 - ⬜ Commit index advancement
 - ⬜ State-machine application pipeline
 - ⬜ Persistent term and vote metadata
 - ⬜ Crash recovery
-- ⬜ Log conflict resolution
 - ⬜ Snapshots
 - ⬜ Chaos controller
 - ⬜ Fiber management API

@@ -118,6 +118,16 @@ func (n *Node) HandleAppendEntries(
 			return response, nil
 		}
 	}
+	if len(req.Entries) > 0 {
+
+		entries := protobufEntriesToLogEntries(req.Entries)
+
+		if err := n.resolveConflicts(entries); err != nil {
+			n.mu.Unlock()
+			return nil, err
+		}
+	}
+
 	response := &pb.AppendEntriesResponse{
 		Term:    n.persistent.CurrentTerm,
 		Success: true,

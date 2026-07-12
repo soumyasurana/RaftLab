@@ -261,11 +261,11 @@ Upon completion, RaftLab will demonstrate practical understanding of:
 | Milestone                | Status      |
 | ------------------------ | ----------- |
 | Project Scaffold         | ✅ Completed |
-| Cluster Configuration    | ⏳ Planned   |
-| gRPC Infrastructure      | ⏳ Planned   |
-| Leader Election          | ⏳ Planned   |
-| Log Replication          | ⏳ Planned   |
-| Persistent WAL           | ⏳ Planned   |
+| Cluster Configuration    | ✅ Completed |
+| gRPC Infrastructure      | ✅ Completed |
+| Leader Election          | ✅ Completed |
+| Log Replication          | ✅ Completed |
+| Persistent WAL           | ✅ Completed |
 | Replicated State Machine | ⏳ Planned   |
 | Fault Injection          | ⏳ Planned   |
 | HTTP API                 | ⏳ Planned   |

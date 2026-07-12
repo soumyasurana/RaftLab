@@ -42,11 +42,23 @@ go test ./...
 
 ### Run a local cluster
 
+Start the five-node Raft cluster:
+
 ```bash
-docker compose -f deployments/docker-compose.yml up
+./scripts/run_cluster.sh
 ```
 
-_(Cluster bring-up is in progress — this section will be updated with node CLI flags and a walkthrough once the Raft Node and gRPC Transport milestones are complete.)_
+Stop the cluster:
+
+```bash
+./scripts/stop_cluster.sh
+```
+
+View the cluster logs:
+
+```bash
+docker compose -f deployments/docker-compose.yml logs -f
+```
 
 ---
 

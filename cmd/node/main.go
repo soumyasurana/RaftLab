@@ -14,9 +14,14 @@ import (
 )
 
 func main() {
+	defaultConfig := os.Getenv("CONFIG_PATH")
+	if defaultConfig == "" {
+		defaultConfig = "deployments/configs/local/node1.yaml"
+	}
+
 	configPath := flag.String(
 		"config",
-		"deployments/configs/node1.yaml",
+		defaultConfig,
 		"path to the node configuration file",
 	)
 

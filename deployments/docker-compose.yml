@@ -1,7 +1,8 @@
-version: '3.8'
+version: "3.8"
 
 services:
   node1:
+    container_name: raft-node1
     build:
       context: ..
       dockerfile: deployments/Dockerfile
@@ -9,11 +10,16 @@ services:
       - "8081:8080"
       - "50051:50051"
     volumes:
-      - ./configs/node1.yaml:/app/config.yaml
+      - ./configs/docker/node1.yaml:/app/config.yaml
+      - ./data/node1:/app/data/node1
     environment:
-      - CONFIG_PATH=/app/config.yaml
+      CONFIG_PATH: /app/config.yaml
+    restart: unless-stopped
+    networks:
+      - raft-network
 
   node2:
+    container_name: raft-node2
     build:
       context: ..
       dockerfile: deployments/Dockerfile
@@ -21,11 +27,16 @@ services:
       - "8082:8080"
       - "50052:50051"
     volumes:
-      - ./configs/node2.yaml:/app/config.yaml
+      - ./configs/docker/node2.yaml:/app/config.yaml
+      - ./data/node2:/app/data/node2
     environment:
-      - CONFIG_PATH=/app/config.yaml
+      CONFIG_PATH: /app/config.yaml
+    restart: unless-stopped
+    networks:
+      - raft-network
 
   node3:
+    container_name: raft-node3
     build:
       context: ..
       dockerfile: deployments/Dockerfile
@@ -33,11 +44,16 @@ services:
       - "8083:8080"
       - "50053:50051"
     volumes:
-      - ./configs/node3.yaml:/app/config.yaml
+      - ./configs/docker/node3.yaml:/app/config.yaml
+      - ./data/node3:/app/data/node3
     environment:
-      - CONFIG_PATH=/app/config.yaml
+      CONFIG_PATH: /app/config.yaml
+    restart: unless-stopped
+    networks:
+      - raft-network
 
   node4:
+    container_name: raft-node4
     build:
       context: ..
       dockerfile: deployments/Dockerfile
@@ -45,11 +61,16 @@ services:
       - "8084:8080"
       - "50054:50051"
     volumes:
-      - ./configs/node4.yaml:/app/config.yaml
+      - ./configs/docker/node4.yaml:/app/config.yaml
+      - ./data/node4:/app/data/node4
     environment:
-      - CONFIG_PATH=/app/config.yaml
+      CONFIG_PATH: /app/config.yaml
+    restart: unless-stopped
+    networks:
+      - raft-network
 
   node5:
+    container_name: raft-node5
     build:
       context: ..
       dockerfile: deployments/Dockerfile
@@ -57,6 +78,14 @@ services:
       - "8085:8080"
       - "50055:50051"
     volumes:
-      - ./configs/node5.yaml:/app/config.yaml
+      - ./configs/docker/node5.yaml:/app/config.yaml
+      - ./data/node5:/app/data/node5
     environment:
-      - CONFIG_PATH=/app/config.yaml
+      CONFIG_PATH: /app/config.yaml
+    restart: unless-stopped
+    networks:
+      - raft-network
+
+networks:
+  raft-network:
+    driver: bridge

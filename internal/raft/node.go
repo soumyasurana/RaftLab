@@ -6,6 +6,7 @@ import (
 	"github.com/soumyasurana/RaftLab/internal/config"
 	"github.com/soumyasurana/RaftLab/internal/rpc"
 	"github.com/soumyasurana/RaftLab/internal/statemachine"
+	"github.com/soumyasurana/RaftLab/internal/storage/metadata"
 	"github.com/soumyasurana/RaftLab/internal/storage/wal"
 )
 
@@ -16,10 +17,11 @@ type Node struct {
 	electionTimer *electionTimer
 	role          Role
 	heartbeat     *heartbeatManager
+	metadata      *metadata.Store
 	persistent    PersistentState
 	volatile      VolatileState
-
-	wal *wal.WAL
+	pending       map[uint64]chan error
+	wal           *wal.WAL
 
 	stateMachine *statemachine.KVStore
 

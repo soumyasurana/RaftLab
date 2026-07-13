@@ -2,6 +2,7 @@ package raft
 
 import (
 	"context"
+	"log"
 
 	pb "github.com/soumyasurana/RaftLab/internal/pb/raft"
 	"github.com/soumyasurana/RaftLab/pkg/types"
@@ -46,6 +47,9 @@ func (n *Node) HandleRequestVote(
 
 	if voteGranted {
 		n.persistent.VotedFor = types.NodeID(req.CandidateId)
+		if err := n.persistLocked(); err != nil {
+			return nil, err
+		}
 
 		// Later, will reset the election timer here.
 	}
@@ -149,6 +153,9 @@ func (n *Node) becomeFollowerLocked(term uint64) {
 	n.role = Follower
 	n.persistent.CurrentTerm = term
 	n.persistent.VotedFor = ""
+	if err := n.persistLocked(); err != nil {
+		log.Printf("persist metadata: %v", err)
+	}
 }
 
 // lastLogInfoLocked returns the index and term of the latest WAL entry.

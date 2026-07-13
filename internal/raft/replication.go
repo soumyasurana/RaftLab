@@ -96,7 +96,6 @@ func (n *Node) handleAppendEntriesResponse(
 	response *pb.AppendEntriesResponse,
 	replicated int,
 ) {
-
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
@@ -109,19 +108,26 @@ func (n *Node) handleAppendEntriesResponse(
 		return
 	}
 
+	nodeID := types.NodeID(peerID)
+
 	if response.Success {
 
-		n.volatile.NextIndex[types.NodeID(peerID)] += uint64(replicated)
+		n.volatile.NextIndex[nodeID] += uint64(replicated)
 
 		if replicated > 0 {
-			n.volatile.MatchIndex[types.NodeID(peerID)] =
-				n.volatile.NextIndex[types.NodeID(peerID)] - 1
+			n.volatile.MatchIndex[nodeID] =
+				n.volatile.NextIndex[nodeID] - 1
+
+			// Check whether a quorum has replicated a new entry.
+			n.advanceCommitIndex()
 		}
 
 		return
 	}
 
-	if n.volatile.NextIndex[types.NodeID(peerID)] > 1 {
-		n.volatile.NextIndex[types.NodeID(peerID)]--
+	// Replication failed.
+	// Decrement NextIndex so the next AppendEntries retries from an earlier log position.
+	if n.volatile.NextIndex[nodeID] > 1 {
+		n.volatile.NextIndex[nodeID]--
 	}
 }

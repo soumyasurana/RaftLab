@@ -241,7 +241,7 @@ func (w *WAL) TruncateAfter(index uint64) error {
 	return w.segment.Sync()
 }
 
-// AppendEntries appends multiple log entries atomically.
+// AppendEntries appends multiple log entries.
 func (w *WAL) AppendEntries(entries []types.LogEntry) error {
 	for _, entry := range entries {
 		if err := w.Append(entry); err != nil {

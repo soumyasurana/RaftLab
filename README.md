@@ -77,15 +77,15 @@ docker compose -f deployments/docker-compose.yml logs -f
 - ⏳ Raft node lifecycle
 - ✅ gRPC transport
 - ✅ Initial RequestVote handling
-- ⏳ AppendEntries handling
+- ✅ AppendEntries handling
 - ✅ Election timers
 - ✅ Initial Leader election
-- ✅ Heartbeats
+- ⏳ Heartbeats
 - ✅ Log replication
 - ✅ Log conflict resolution
-- ⬜ Commit index advancement
-- ⬜ State-machine application pipeline
-- ⬜ Persistent term and vote metadata
+- ✅ Commit index advancement
+- ✅ State-machine application pipeline
+- ⏳ Persistent term and vote metadata
 - ⬜ Crash recovery
 - ⬜ Snapshots
 - ⬜ Chaos controller

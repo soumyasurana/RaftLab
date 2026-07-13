@@ -22,8 +22,18 @@ func (n *Node) handleElectionTimeout() {
 	}
 
 	n.role = Candidate
+
 	n.persistent.CurrentTerm++
 	n.persistent.VotedFor = n.config.Node.ID
+
+	if err := n.persistLocked(); err != nil {
+		n.mu.Unlock()
+		log.Printf(
+			"persist metadata: %v",
+			err,
+		)
+		return
+	}
 
 	electionTerm := n.persistent.CurrentTerm
 	log.Printf(

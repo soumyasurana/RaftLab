@@ -4,12 +4,30 @@ import (
 	"github.com/soumyasurana/RaftLab/internal/config"
 	"github.com/soumyasurana/RaftLab/internal/rpc"
 	"github.com/soumyasurana/RaftLab/internal/statemachine"
+	"github.com/soumyasurana/RaftLab/internal/storage/metadata"
 	"github.com/soumyasurana/RaftLab/internal/storage/wal"
 )
 
 func New(cfg *config.Config) (*Node, error) {
-	log, err := wal.Open(cfg.Node.DataDir + "/raft.wal")
+
+	log, err := wal.Open(
+		cfg.Node.DataDir + "/raft.wal",
+	)
 	if err != nil {
+		return nil, err
+	}
+
+	metaStore, err := metadata.Open(
+		cfg.Node.DataDir + "/metadata.json",
+	)
+	if err != nil {
+		_ = log.Close()
+		return nil, err
+	}
+
+	persistentState, err := metaStore.Load()
+	if err != nil {
+		_ = log.Close()
 		return nil, err
 	}
 
@@ -20,6 +38,7 @@ func New(cfg *config.Config) (*Node, error) {
 			string(peer.ID),
 			peer.Address,
 		); err != nil {
+
 			_ = rpcClient.Close()
 			_ = log.Close()
 
@@ -32,7 +51,14 @@ func New(cfg *config.Config) (*Node, error) {
 
 		role: Follower,
 
-		wal: log,
+		persistent: PersistentState{
+			CurrentTerm: uint64(persistentState.CurrentTerm),
+			VotedFor:    persistentState.VotedFor,
+		},
+		pending:  make(map[uint64]chan error),
+		wal:      log,
+		metadata: metaStore,
+
 		heartbeat: newHeartbeatManager(
 			cfg.Node.HeartbeatTimeout,
 		),

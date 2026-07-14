@@ -1,6 +1,8 @@
 package raft
 
 import (
+	crypto_rand "crypto/rand"
+	"encoding/binary"
 	"math/rand"
 	"sync"
 	"time"
@@ -15,6 +17,7 @@ type electionTimer struct {
 	stopCh  chan struct{}
 
 	stopOnce sync.Once
+	rng      *rand.Rand
 }
 
 // newElectionTimer creates an election timer with randomized timeouts.
@@ -22,11 +25,17 @@ func newElectionTimer(
 	minTimeout time.Duration,
 	maxTimeout time.Duration,
 ) *electionTimer {
+	var b [8]byte
+	_, _ = crypto_rand.Read(b[:])
+	seed := int64(binary.LittleEndian.Uint64(b[:]))
+	rng := rand.New(rand.NewSource(seed))
+
 	return &electionTimer{
 		minTimeout: minTimeout,
 		maxTimeout: maxTimeout,
 		resetCh:    make(chan struct{}, 1),
 		stopCh:     make(chan struct{}),
+		rng:        rng,
 	}
 }
 
@@ -75,7 +84,7 @@ func (t *electionTimer) randomTimeout() time.Duration {
 	}
 
 	return t.minTimeout +
-		time.Duration(rand.Int63n(int64(timeoutRange)))
+		time.Duration(t.rng.Int63n(int64(timeoutRange)))
 }
 
 // resetTimer safely stops, drains, and resets a timer.

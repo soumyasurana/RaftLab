@@ -9,9 +9,8 @@ import (
 )
 
 type PersistentState struct {
-	CurrentTerm types.Term     `json:"current_term"`
-	VotedFor    types.NodeID   `json:"voted_for"`
-	CommitIndex types.LogIndex `json:"commit_index"`
+	CurrentTerm types.Term   `json:"current_term"`
+	VotedFor    types.NodeID `json:"voted_for"`
 }
 
 type Store struct {

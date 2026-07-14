@@ -13,7 +13,6 @@ func (n *Node) persistLocked() error {
 		metadata.PersistentState{
 			CurrentTerm: types.Term(n.persistent.CurrentTerm),
 			VotedFor:    n.persistent.VotedFor,
-			CommitIndex: types.LogIndex(n.volatile.CommitIndex),
 		},
 	)
 }

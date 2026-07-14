@@ -51,7 +51,7 @@ func (n *Node) HandleRequestVote(
 			return nil, err
 		}
 
-		// Later, will reset the election timer here.
+		n.electionTimer.reset()
 	}
 
 	return &pb.RequestVoteResponse{
@@ -80,6 +80,8 @@ func (n *Node) HandleAppendEntries(
 
 		return response, nil
 	}
+
+	defer n.electionTimer.reset()
 
 	// Update term / become follower.
 	if req.Term > n.persistent.CurrentTerm {
@@ -132,14 +134,32 @@ func (n *Node) HandleAppendEntries(
 		}
 	}
 
+	if req.LeaderCommit > n.volatile.CommitIndex {
+		lastEntry, ok, err := n.wal.LastEntry()
+		if err != nil {
+			n.mu.Unlock()
+			return nil, err
+		}
+		if ok {
+			lastIndex := uint64(lastEntry.Index)
+			if req.LeaderCommit < lastIndex {
+				n.volatile.CommitIndex = req.LeaderCommit
+			} else {
+				n.volatile.CommitIndex = lastIndex
+			}
+			if err := n.applyCommittedEntries(); err != nil {
+				n.mu.Unlock()
+				return nil, err
+			}
+		}
+	}
+
 	response := &pb.AppendEntriesResponse{
 		Term:    n.persistent.CurrentTerm,
 		Success: true,
 	}
 
 	n.mu.Unlock()
-
-	n.electionTimer.reset()
 
 	return response, nil
 }

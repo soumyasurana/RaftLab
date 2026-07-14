@@ -74,13 +74,13 @@ docker compose -f deployments/docker-compose.yml logs -f
 - ✅ Generated protobuf bindings
 - ✅ Write-Ahead Log
 - ✅ Deterministic key-value state machine
-- ⏳ Raft node lifecycle
+- ✅ Raft node lifecycle
 - ✅ gRPC transport
 - ✅ Initial RequestVote handling
 - ✅ AppendEntries handling
 - ✅ Election timers
 - ✅ Initial Leader election
-- ⏳ Heartbeats
+- ✅ Heartbeats
 - ✅ Log replication
 - ✅ Log conflict resolution
 - ✅ Commit index advancement

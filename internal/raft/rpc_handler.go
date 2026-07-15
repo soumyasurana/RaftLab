@@ -5,6 +5,7 @@ import (
 	"log"
 
 	pb "github.com/soumyasurana/RaftLab/internal/pb/raft"
+	"github.com/soumyasurana/RaftLab/internal/snapshot"
 	"github.com/soumyasurana/RaftLab/pkg/types"
 )
 
@@ -197,4 +198,69 @@ func (n *Node) lastLogInfoLocked() (
 	return uint64(entry.Index),
 		uint64(entry.Term),
 		nil
+}
+
+// HandleInstallSnapshot processes an incoming InstallSnapshot RPC.
+func (n *Node) HandleInstallSnapshot(
+	_ context.Context,
+	req *pb.InstallSnapshotRequest,
+) (*pb.InstallSnapshotResponse, error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	// 1. Reply immediately if term < currentTerm
+	if req.Term < n.persistent.CurrentTerm {
+		return &pb.InstallSnapshotResponse{Term: n.persistent.CurrentTerm}, nil
+	}
+
+	n.electionTimer.reset()
+
+	if req.Term > n.persistent.CurrentTerm {
+		n.becomeFollowerLocked(req.Term)
+	} else if n.role != Follower {
+		n.role = Follower
+	}
+
+	// Save snapshot file, discard any existing or partial snapshot with a smaller index
+	if req.LastIncludedIndex <= n.volatile.LastIncludedIndex {
+		return &pb.InstallSnapshotResponse{Term: n.persistent.CurrentTerm}, nil
+	}
+
+	// Restore state machine
+	if err := n.stateMachine.Restore(req.Data); err != nil {
+		return nil, err
+	}
+
+	// Update snapshot store
+	snap := snapshot.Snapshot{
+		LastIncludedIndex: req.LastIncludedIndex,
+		LastIncludedTerm:  req.LastIncludedTerm,
+		Data:              req.Data,
+	}
+	if err := n.snapshotStore.Save(snap); err != nil {
+		return nil, err
+	}
+
+	n.volatile.LastIncludedIndex = req.LastIncludedIndex
+	n.volatile.LastIncludedTerm = req.LastIncludedTerm
+
+	// If existing log entry has same index and term as snapshot's last included entry, retain log entries following it and reply
+	entry, ok, err := n.wal.EntryAt(req.LastIncludedIndex)
+	if err == nil && ok && uint64(entry.Term) == req.LastIncludedTerm {
+		_ = n.wal.TruncateBefore(req.LastIncludedIndex)
+	} else {
+		// Discard the entire log
+		// We can do this by just truncating after 0, but since the API doesn't fully support wiping and resetting index easily,
+		// we'll truncate after 0 (which removes everything). Wait, TruncateAfter(0) will keep entries <= 0, which is empty.
+		_ = n.wal.TruncateAfter(0)
+	}
+
+	if n.volatile.CommitIndex < req.LastIncludedIndex {
+		n.volatile.CommitIndex = req.LastIncludedIndex
+	}
+	if n.volatile.LastApplied < req.LastIncludedIndex {
+		n.volatile.LastApplied = req.LastIncludedIndex
+	}
+
+	return &pb.InstallSnapshotResponse{Term: n.persistent.CurrentTerm}, nil
 }

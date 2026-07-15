@@ -31,8 +31,10 @@ type PersistentState struct {
 
 // VolatileState exists only in memory.
 type VolatileState struct {
-	CommitIndex uint64
-	LastApplied uint64
+	CommitIndex       uint64
+	LastApplied       uint64
+	LastIncludedIndex uint64
+	LastIncludedTerm  uint64
 	// Leader state (reinitialized after election)
 	NextIndex  map[types.NodeID]uint64
 	MatchIndex map[types.NodeID]uint64

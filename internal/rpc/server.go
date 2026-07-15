@@ -26,6 +26,11 @@ type RaftHandler interface {
 		ctx context.Context,
 		req *pb.AppendEntriesRequest,
 	) (*pb.AppendEntriesResponse, error)
+
+	HandleInstallSnapshot(
+		ctx context.Context,
+		req *pb.InstallSnapshotRequest,
+	) (*pb.InstallSnapshotResponse, error)
 }
 
 // Server exposes the Raft consensus protocol over gRPC.
@@ -91,4 +96,12 @@ func (s *Server) AppendEntries(
 	req *pb.AppendEntriesRequest,
 ) (*pb.AppendEntriesResponse, error) {
 	return s.handler.HandleAppendEntries(ctx, req)
+}
+
+// InstallSnapshot handles an incoming InstallSnapshot RPC.
+func (s *Server) InstallSnapshot(
+	ctx context.Context,
+	req *pb.InstallSnapshotRequest,
+) (*pb.InstallSnapshotResponse, error) {
+	return s.handler.HandleInstallSnapshot(ctx, req)
 }

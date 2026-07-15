@@ -115,6 +115,29 @@ func (c *Client) AppendEntries(
 	return response, nil
 }
 
+// InstallSnapshot sends an InstallSnapshot RPC to a peer.
+func (c *Client) InstallSnapshot(
+	ctx context.Context,
+	peerID string,
+	req *pb.InstallSnapshotRequest,
+) (*pb.InstallSnapshotResponse, error) {
+	client, err := c.peerClient(peerID)
+	if err != nil {
+		return nil, err
+	}
+
+	response, err := client.InstallSnapshot(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"install snapshot to peer %s: %w",
+			peerID,
+			err,
+		)
+	}
+
+	return response, nil
+}
+
 // Close closes every peer connection.
 func (c *Client) Close() error {
 	c.mu.Lock()

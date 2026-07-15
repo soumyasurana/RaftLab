@@ -41,10 +41,11 @@ type Peer struct {
 
 // NodeConfig contains the configuration for a node.
 type NodeConfig struct {
-	ID               NodeID        `yaml:"id"`
-	Address          string        `yaml:"address"`
-	DataDir          string        `yaml:"data_dir"`
-	ElectionTimeout  time.Duration `yaml:"election_timeout"`
-	HeartbeatTimeout time.Duration `yaml:"heartbeat_timeout"`
-	Peers            []Peer        `yaml:"peers"`
+	ID                NodeID        `yaml:"id"`
+	Address           string        `yaml:"address"`
+	DataDir           string        `yaml:"data_dir"`
+	SnapshotThreshold uint64        `yaml:"snapshot_threshold"`
+	ElectionTimeout   time.Duration `yaml:"election_timeout"`
+	HeartbeatTimeout  time.Duration `yaml:"heartbeat_timeout"`
+	Peers             []Peer        `yaml:"peers"`
 }

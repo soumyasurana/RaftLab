@@ -12,8 +12,9 @@ import (
 )
 
 const (
-	DefaultElectionTimeout  = 300 * time.Millisecond
-	DefaultHeartbeatTimeout = 100 * time.Millisecond
+	DefaultElectionTimeout   = 300 * time.Millisecond
+	DefaultHeartbeatTimeout  = 100 * time.Millisecond
+	DefaultSnapshotThreshold = 100
 )
 
 type Config struct {
@@ -27,6 +28,8 @@ type fileConfig struct {
 	Address string `yaml:"address"`
 
 	DataDir string `yaml:"data_dir"`
+
+	SnapshotThreshold uint64 `yaml:"snapshot_threshold"`
 
 	ElectionTimeout string `yaml:"election_timeout"`
 
@@ -60,6 +63,12 @@ func Load(path string) (*Config, error) {
 	cfg.Node.ID = types.NodeID(raw.ID)
 	cfg.Node.Address = raw.Address
 	cfg.Node.DataDir = raw.DataDir
+
+	if raw.SnapshotThreshold == 0 {
+		cfg.Node.SnapshotThreshold = DefaultSnapshotThreshold
+	} else {
+		cfg.Node.SnapshotThreshold = raw.SnapshotThreshold
+	}
 
 	if raw.ElectionTimeout == "" {
 		cfg.Node.ElectionTimeout = DefaultElectionTimeout

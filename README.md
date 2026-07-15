@@ -87,7 +87,7 @@ docker compose -f deployments/docker-compose.yml logs -f
 - ✅ State-machine application pipeline
 - ✅ Persistent term and vote metadata
 - ✅ Crash recovery
-- ⬜ Snapshots
+- ✅ Snapshots
 - ⬜ Chaos controller
 - ⬜ Fiber management API
 - ⬜ WebSocket event stream

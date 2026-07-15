@@ -3,6 +3,7 @@ package raft
 import (
 	"github.com/soumyasurana/RaftLab/internal/config"
 	"github.com/soumyasurana/RaftLab/internal/rpc"
+	"github.com/soumyasurana/RaftLab/internal/snapshot"
 	"github.com/soumyasurana/RaftLab/internal/statemachine"
 	"github.com/soumyasurana/RaftLab/internal/storage/metadata"
 	"github.com/soumyasurana/RaftLab/internal/storage/wal"
@@ -35,6 +36,23 @@ func New(cfg *config.Config) (*Node, error) {
 		return nil, err
 	}
 
+	snapshotStore := snapshot.NewFileStore(cfg.Node.DataDir)
+	snap, exists, err := snapshotStore.Load()
+	if err != nil {
+		return nil, err
+	}
+
+	stateMachine := statemachine.New()
+	var lastIncludedIndex, lastIncludedTerm uint64
+
+	if exists {
+		if err := stateMachine.Restore(snap.Data); err != nil {
+			return nil, err
+		}
+		lastIncludedIndex = snap.LastIncludedIndex
+		lastIncludedTerm = snap.LastIncludedTerm
+	}
+
 	node := &Node{
 		config: cfg,
 
@@ -43,14 +61,17 @@ func New(cfg *config.Config) (*Node, error) {
 			VotedFor:    persistentState.VotedFor,
 		},
 		volatile: VolatileState{
-			CommitIndex: 0,
-			LastApplied: 0,
+			CommitIndex:       lastIncludedIndex,
+			LastApplied:       lastIncludedIndex,
+			LastIncludedIndex: lastIncludedIndex,
+			LastIncludedTerm:  lastIncludedTerm,
 		},
-		pending:  make(map[uint64]chan error),
-		wal:      log,
-		metadata: metaStore,
+		pending:       make(map[uint64]chan error),
+		wal:           log,
+		metadata:      metaStore,
+		snapshotStore: snapshotStore,
 
-		stateMachine: statemachine.New(),
+		stateMachine: stateMachine,
 	}
 
 	// Replay committed entries

@@ -1,6 +1,9 @@
 package statemachine
 
-import "sync"
+import (
+	"encoding/json"
+	"sync"
+)
 
 // KVStore is a deterministic replicated state machine.
 type KVStore struct {
@@ -38,4 +41,26 @@ func (kv *KVStore) Snapshot() map[string]string {
 	}
 
 	return copy
+}
+
+// Marshal serializes the state machine to a byte slice.
+func (kv *KVStore) Marshal() ([]byte, error) {
+	kv.mu.RLock()
+	defer kv.mu.RUnlock()
+
+	return json.Marshal(kv.data)
+}
+
+// Restore overwrites the state machine with data from a snapshot.
+func (kv *KVStore) Restore(data []byte) error {
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+
+	var newData map[string]string
+	if err := json.Unmarshal(data, &newData); err != nil {
+		return err
+	}
+
+	kv.data = newData
+	return nil
 }

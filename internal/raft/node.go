@@ -5,6 +5,7 @@ import (
 
 	"github.com/soumyasurana/RaftLab/internal/config"
 	"github.com/soumyasurana/RaftLab/internal/rpc"
+	"github.com/soumyasurana/RaftLab/internal/snapshot"
 	"github.com/soumyasurana/RaftLab/internal/statemachine"
 	"github.com/soumyasurana/RaftLab/internal/storage/metadata"
 	"github.com/soumyasurana/RaftLab/internal/storage/wal"
@@ -22,6 +23,7 @@ type Node struct {
 	volatile      VolatileState
 	pending       map[uint64]chan error
 	wal           *wal.WAL
+	snapshotStore *snapshot.FileStore
 
 	stateMachine *statemachine.KVStore
 

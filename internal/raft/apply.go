@@ -32,5 +32,7 @@ func (n *Node) applyCommittedEntries() error {
 		n.volatile.LastApplied = nextIndex
 	}
 
+	n.maybeTakeSnapshot()
+
 	return nil
 }

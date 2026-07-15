@@ -31,6 +31,15 @@ func (m *mockRaftHandler) HandleAppendEntries(
 	}, nil
 }
 
+func (m *mockRaftHandler) HandleInstallSnapshot(
+	_ context.Context,
+	req *pb.InstallSnapshotRequest,
+) (*pb.InstallSnapshotResponse, error) {
+	return &pb.InstallSnapshotResponse{
+		Term: req.Term,
+	}, nil
+}
+
 func TestRequestVoteRPC(t *testing.T) {
 	address := freeAddress(t)
 

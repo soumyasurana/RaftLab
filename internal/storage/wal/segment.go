@@ -22,6 +22,10 @@ func (s *Segment) Write(record []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	return s.writeLocked(record)
+}
+
+func (s *Segment) writeLocked(record []byte) error {
 	if len(record) == 0 {
 		return ErrEmptyEntry
 	}
@@ -56,4 +60,10 @@ func (s *Segment) Close() error {
 	defer s.mu.Unlock()
 
 	return s.file.Close()
+}
+
+// syncLocked flushes the current segment to disk.
+// The caller must already hold s.mu.
+func (s *Segment) syncLocked() error {
+	return s.file.Sync()
 }

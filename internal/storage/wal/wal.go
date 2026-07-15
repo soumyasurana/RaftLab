@@ -233,12 +233,12 @@ func (w *WAL) TruncateAfter(index uint64) error {
 			return err
 		}
 
-		if err := w.segment.Write(data); err != nil {
+		if err := w.segment.writeLocked(data); err != nil {
 			return err
 		}
 	}
 
-	return w.segment.Sync()
+	return w.segment.syncLocked()
 }
 
 // AppendEntries appends multiple log entries.
@@ -250,4 +250,57 @@ func (w *WAL) AppendEntries(entries []types.LogEntry) error {
 	}
 
 	return nil
+}
+
+// TruncateBefore removes all entries up to and including the given index.
+// Used during log compaction.
+func (w *WAL) TruncateBefore(index uint64) error {
+
+	w.segment.mu.Lock()
+	defer w.segment.mu.Unlock()
+
+	entries, err := w.readAllLocked()
+	if err != nil {
+		return err
+	}
+
+	var retained []types.LogEntry
+
+	for _, entry := range entries {
+		if uint64(entry.Index) > index {
+			retained = append(retained, entry)
+		}
+	}
+
+	if err := w.segment.file.Close(); err != nil {
+		return err
+	}
+
+	file, err := os.OpenFile(
+		w.segment.path,
+		os.O_CREATE|
+			os.O_RDWR|
+			os.O_TRUNC|
+			os.O_APPEND,
+		0644,
+	)
+	if err != nil {
+		return err
+	}
+
+	w.segment.file = file
+
+	for _, entry := range retained {
+		record := FromLogEntry(entry)
+		data, err := record.MarshalBinary()
+		if err != nil {
+			return err
+		}
+
+		if err := w.segment.writeLocked(data); err != nil {
+			return err
+		}
+	}
+
+	return w.segment.syncLocked()
 }

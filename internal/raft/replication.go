@@ -21,6 +21,12 @@ func (n *Node) replicateToPeer(peerID string) {
 
 	nextIndex := n.volatile.NextIndex[types.NodeID(peerID)]
 
+	if nextIndex <= n.volatile.LastIncludedIndex {
+		n.mu.RUnlock()
+		n.sendInstallSnapshot(peerID)
+		return
+	}
+
 	term := n.persistent.CurrentTerm
 	leaderCommit := n.volatile.CommitIndex
 
@@ -129,5 +135,56 @@ func (n *Node) handleAppendEntriesResponse(
 	// Decrement NextIndex so the next AppendEntries retries from an earlier log position.
 	if n.volatile.NextIndex[nodeID] > 1 {
 		n.volatile.NextIndex[nodeID]--
+	}
+}
+
+// sendInstallSnapshot sends the most recent snapshot to a follower.
+func (n *Node) sendInstallSnapshot(peerID string) {
+	snap, exists, err := n.snapshotStore.Load()
+	if err != nil || !exists {
+		return
+	}
+
+	n.mu.RLock()
+	if n.role != Leader {
+		n.mu.RUnlock()
+		return
+	}
+	term := n.persistent.CurrentTerm
+	n.mu.RUnlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), appendEntriesTimeout*2)
+	defer cancel()
+
+	req := &pb.InstallSnapshotRequest{
+		Term:              term,
+		LeaderId:          string(n.config.Node.ID),
+		LastIncludedIndex: snap.LastIncludedIndex,
+		LastIncludedTerm:  snap.LastIncludedTerm,
+		Data:              snap.Data,
+	}
+
+	resp, err := n.rpcClient.InstallSnapshot(ctx, peerID, req)
+	if err != nil {
+		return
+	}
+
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	if resp.Term > n.persistent.CurrentTerm {
+		n.becomeFollowerLocked(resp.Term)
+		return
+	}
+
+	if n.role != Leader {
+		return
+	}
+
+	nodeID := types.NodeID(peerID)
+	// After successful installation, nextIndex is at least LastIncludedIndex + 1
+	if snap.LastIncludedIndex+1 > n.volatile.NextIndex[nodeID] {
+		n.volatile.NextIndex[nodeID] = snap.LastIncludedIndex + 1
+		n.volatile.MatchIndex[nodeID] = snap.LastIncludedIndex
 	}
 }

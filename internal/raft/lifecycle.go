@@ -10,6 +10,18 @@ import (
 
 func New(cfg *config.Config) (*Node, error) {
 
+	metaStore, err := metadata.Open(
+		cfg.Node.DataDir + "/metadata.json",
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	persistentState, err := metaStore.Load()
+	if err != nil {
+		return nil, err
+	}
+
 	log, err := wal.Open(
 		cfg.Node.DataDir + "/raft.wal",
 	)
@@ -17,20 +29,40 @@ func New(cfg *config.Config) (*Node, error) {
 		return nil, err
 	}
 
-	metaStore, err := metadata.Open(
-		cfg.Node.DataDir + "/metadata.json",
-	)
-	if err != nil {
+	// Read WAL to ensure it's not corrupted
+	if _, err := log.ReadAll(); err != nil {
 		_ = log.Close()
 		return nil, err
 	}
 
-	persistentState, err := metaStore.Load()
-	if err != nil {
+	node := &Node{
+		config: cfg,
+
+		persistent: PersistentState{
+			CurrentTerm: uint64(persistentState.CurrentTerm),
+			VotedFor:    persistentState.VotedFor,
+		},
+		volatile: VolatileState{
+			CommitIndex: 0,
+			LastApplied: 0,
+		},
+		pending:  make(map[uint64]chan error),
+		wal:      log,
+		metadata: metaStore,
+
+		stateMachine: statemachine.New(),
+	}
+
+	// Replay committed entries
+	if err := node.applyCommittedEntries(); err != nil {
 		_ = log.Close()
 		return nil, err
 	}
 
+	// Become Follower
+	node.role = Follower
+
+	// Join the cluster
 	rpcClient := rpc.NewClient()
 
 	for _, peer := range cfg.Node.Peers {
@@ -46,34 +78,18 @@ func New(cfg *config.Config) (*Node, error) {
 		}
 	}
 
-	node := &Node{
-		config: cfg,
+	node.rpcClient = rpcClient
 
-		role: Follower,
+	node.heartbeat = newHeartbeatManager(
+		cfg.Node.HeartbeatTimeout,
+	)
 
-		persistent: PersistentState{
-			CurrentTerm: uint64(persistentState.CurrentTerm),
-			VotedFor:    persistentState.VotedFor,
-		},
-		pending:  make(map[uint64]chan error),
-		wal:      log,
-		metadata: metaStore,
+	node.electionTimer = newElectionTimer(
+		cfg.Node.ElectionTimeout,
+		cfg.Node.ElectionTimeout*2,
+	)
 
-		heartbeat: newHeartbeatManager(
-			cfg.Node.HeartbeatTimeout,
-		),
-
-		stateMachine: statemachine.New(),
-
-		rpcClient: rpcClient,
-
-		electionTimer: newElectionTimer(
-			cfg.Node.ElectionTimeout,
-			cfg.Node.ElectionTimeout*2,
-		),
-
-		stopCh: make(chan struct{}),
-	}
+	node.stopCh = make(chan struct{})
 
 	return node, nil
 }

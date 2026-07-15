@@ -86,7 +86,7 @@ docker compose -f deployments/docker-compose.yml logs -f
 - ✅ Commit index advancement
 - ✅ State-machine application pipeline
 - ✅ Persistent term and vote metadata
-- ⬜ Crash recovery
+- ✅ Crash recovery
 - ⬜ Snapshots
 - ⬜ Chaos controller
 - ⬜ Fiber management API

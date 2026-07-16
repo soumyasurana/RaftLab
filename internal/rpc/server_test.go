@@ -7,6 +7,9 @@ import (
 	"time"
 
 	pb "github.com/soumyasurana/RaftLab/internal/pb/raft"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/test/bufconn"
 )
 
 type mockRaftHandler struct{}
@@ -41,42 +44,14 @@ func (m *mockRaftHandler) HandleInstallSnapshot(
 }
 
 func TestRequestVoteRPC(t *testing.T) {
-	address := freeAddress(t)
+	client, cleanup := newBufconnClient(t, &mockRaftHandler{})
+	defer cleanup()
 
-	server := NewServer(
-		address,
-		&mockRaftHandler{},
-	)
-
-	serverErr := make(chan error, 1)
-
-	go func() {
-		serverErr <- server.Start()
-	}()
-
-	t.Cleanup(server.Stop)
-
-	client := NewClient()
-
-	t.Cleanup(func() {
-		if err := client.Close(); err != nil {
-			t.Errorf("close RPC client: %v", err)
-		}
-	})
-
-	if err := client.Connect("node-2", address); err != nil {
-		t.Fatalf("connect to RPC server: %v", err)
-	}
-
-	ctx, cancel := context.WithTimeout(
-		context.Background(),
-		3*time.Second,
-	)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	response, err := client.RequestVote(
 		ctx,
-		"node-2",
 		&pb.RequestVoteRequest{
 			Term:         4,
 			CandidateId:  "node-1",
@@ -93,56 +68,19 @@ func TestRequestVoteRPC(t *testing.T) {
 	}
 
 	if response.Term != 4 {
-		t.Fatalf(
-			"expected response term 4, got %d",
-			response.Term,
-		)
-	}
-
-	select {
-	case err := <-serverErr:
-		if err != nil {
-			t.Fatalf("gRPC server stopped unexpectedly: %v", err)
-		}
-	default:
+		t.Fatalf("expected response term 4, got %d", response.Term)
 	}
 }
 
 func TestAppendEntriesRPC(t *testing.T) {
-	address := freeAddress(t)
+	client, cleanup := newBufconnClient(t, &mockRaftHandler{})
+	defer cleanup()
 
-	server := NewServer(
-		address,
-		&mockRaftHandler{},
-	)
-
-	go func() {
-		_ = server.Start()
-	}()
-
-	t.Cleanup(server.Stop)
-
-	client := NewClient()
-
-	t.Cleanup(func() {
-		if err := client.Close(); err != nil {
-			t.Errorf("close RPC client: %v", err)
-		}
-	})
-
-	if err := client.Connect("node-2", address); err != nil {
-		t.Fatalf("connect to RPC server: %v", err)
-	}
-
-	ctx, cancel := context.WithTimeout(
-		context.Background(),
-		3*time.Second,
-	)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	response, err := client.AppendEntries(
 		ctx,
-		"node-2",
 		&pb.AppendEntriesRequest{
 			Term:         7,
 			LeaderId:     "node-1",
@@ -160,29 +98,41 @@ func TestAppendEntriesRPC(t *testing.T) {
 	}
 
 	if response.Term != 7 {
-		t.Fatalf(
-			"expected response term 7, got %d",
-			response.Term,
-		)
+		t.Fatalf("expected response term 7, got %d", response.Term)
 	}
 }
 
-func freeAddress(t *testing.T) string {
+func newBufconnClient(
+	t *testing.T,
+	handler RaftHandler,
+) (pb.RaftServiceClient, func()) {
 	t.Helper()
 
-	listener, err := net.Listen(
-		"tcp",
-		"127.0.0.1:0",
+	lis := bufconn.Listen(1024 * 1024)
+	server := NewServer("bufconn", handler)
+
+	go func() {
+		_ = server.grpcServer.Serve(lis)
+	}()
+
+	conn, err := grpc.DialContext(
+		context.Background(),
+		"bufconn",
+		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
+			return lis.Dial()
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
-		t.Fatalf("allocate test address: %v", err)
+		t.Fatalf("dial bufconn server: %v", err)
 	}
 
-	address := listener.Addr().String()
+	client := pb.NewRaftServiceClient(conn)
 
-	if err := listener.Close(); err != nil {
-		t.Fatalf("close temporary listener: %v", err)
+	cleanup := func() {
+		server.Stop()
+		_ = conn.Close()
 	}
 
-	return address
+	return client, cleanup
 }

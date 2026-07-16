@@ -12,15 +12,18 @@ import (
 
 // Client manages persistent gRPC connections to Raft peers.
 type Client struct {
+	ownerID string
+
 	mu sync.RWMutex
 
 	connections map[string]*grpc.ClientConn
 	clients     map[string]pb.RaftServiceClient
 }
 
-// NewClient creates an empty Raft RPC client.
-func NewClient() *Client {
+// NewClient creates an empty Raft RPC client for the given node.
+func NewClient(ownerID string) *Client {
 	return &Client{
+		ownerID:     ownerID,
 		connections: make(map[string]*grpc.ClientConn),
 		clients:     make(map[string]pb.RaftServiceClient),
 	}

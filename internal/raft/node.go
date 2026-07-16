@@ -13,7 +13,7 @@ import (
 
 type Node struct {
 	mu            sync.RWMutex
-	rpcClient     *rpc.Client
+	rpcClient     rpc.Transport
 	config        *config.Config
 	electionTimer *electionTimer
 	role          Role

@@ -88,7 +88,7 @@ docker compose -f deployments/docker-compose.yml logs -f
 - ✅ Persistent term and vote metadata
 - ✅ Crash recovery
 - ✅ Snapshots
-- ⬜ Chaos controller
+- ✅ Chaos controller
 - ⬜ Fiber management API
 - ⬜ WebSocket event stream
 - ⬜ Next.js dashboard

@@ -10,7 +10,13 @@ import (
 )
 
 func New(cfg *config.Config) (*Node, error) {
+	return NewWithTransport(cfg, nil)
+}
 
+func NewWithTransport(
+	cfg *config.Config,
+	transport rpc.Transport,
+) (*Node, error) {
 	metaStore, err := metadata.Open(
 		cfg.Node.DataDir + "/metadata.json",
 	)
@@ -84,14 +90,16 @@ func New(cfg *config.Config) (*Node, error) {
 	node.role = Follower
 
 	// Join the cluster
-	rpcClient := rpc.NewClient()
+	rpcClient := transport
+	if rpcClient == nil {
+		rpcClient = rpc.NewClient(string(cfg.Node.ID))
+	}
 
 	for _, peer := range cfg.Node.Peers {
 		if err := rpcClient.Connect(
 			string(peer.ID),
 			peer.Address,
 		); err != nil {
-
 			_ = rpcClient.Close()
 			_ = log.Close()
 
@@ -124,7 +132,10 @@ func (n *Node) Stop() error {
 
 	close(n.stopCh)
 
-	rpcErr := n.rpcClient.Close()
+	var rpcErr error
+	if n.rpcClient != nil {
+		rpcErr = n.rpcClient.Close()
+	}
 	walErr := n.wal.Close()
 
 	if rpcErr != nil {

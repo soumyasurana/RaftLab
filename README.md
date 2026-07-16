@@ -16,13 +16,55 @@ Its primary goal is to deepen understanding of distributed systems while showcas
 
 ---
 
-## Getting Started
+## Dashboard
 
-> Note: RaftLab is under active development. Instructions below reflect the current state of the build; some commands will change as features land.
+RaftLab now includes a production-style Next.js dashboard that turns the cluster into a live platform:
+
+- Cluster overview cards with leader, term, uptime, commit index, and snapshot status
+- Live topology view rendered with React Flow
+- Node detail inspection for persistent, volatile, snapshot, and storage state
+- Replicated state machine browser with search, JSON, and table modes
+- Recharts-based metrics dashboard
+- Live event timeline synthesized from the cluster state
+- Chaos controls for latency, packet loss, partitions, and node failure
+- Snapshot management and cluster health tables
+
+### Architecture
+
+```mermaid
+flowchart LR
+  subgraph Browser["Browser"]
+    UI["Next.js Dashboard"]
+  end
+
+  subgraph Dashboard["Dashboard Runtime"]
+    API["Next API routes"]
+  end
+
+  subgraph Cluster["Raft Cluster"]
+    N1["raft-0 management API"]
+    N2["raft-1 management API"]
+    N3["raft-2 management API"]
+    N4["raft-3 management API"]
+    N5["raft-4 management API"]
+  end
+
+  UI --> API
+  API --> N1
+  API --> N2
+  API --> N3
+  API --> N4
+  API --> N5
+```
+
+---
+
+## Getting Started
 
 ### Prerequisites
 
 - Go 1.25+
+- Node.js 22+
 - Docker & Docker Compose (for running a local multi-node cluster)
 - `protoc` (Protocol Buffers compiler), if regenerating gRPC code
 
@@ -34,10 +76,19 @@ cd RaftLab
 go build ./...
 ```
 
+Install the dashboard workspace dependencies:
+
+```bash
+npm install
+```
+
 ### Run tests
 
 ```bash
 go test ./...
+npm run lint
+npm run type-check
+npm run build
 ```
 
 ### Run a local cluster
@@ -72,6 +123,15 @@ It covers:
 - Health checks and resource limits
 - `kubectl` commands for rollout, logs, exec, and port-forwarding
 
+The dashboard has its own deployment in [`dashboard/deployments/kubernetes/README.md`](dashboard/deployments/kubernetes/README.md).
+
+It covers:
+
+- Separate Next.js deployment and service
+- Ingress-ready exposure
+- Management API URLs wired through ConfigMap
+- Dashboard-specific Docker build
+
 ---
 
 ## Project Status
@@ -102,8 +162,8 @@ It covers:
 - ✅ Snapshots
 - ✅ Chaos controller
 - ✅ Fiber management API
-- ⏳ WebSocket Event Stream
-- ⏳ Next.js dashboard
+- ✅ WebSocket Event Stream
+- ✅ Next.js dashboard
 - ✅ Kubernetes Deployment (StatefulSet, PVCs, Services)
 
 ---
@@ -150,6 +210,48 @@ It covers:
 - Cluster health monitoring
 - Runtime metrics
 - Live cluster visualization
+
+### Dashboard
+
+- Real-time cluster overview
+- Live topology map
+- Node drill-down
+- State machine explorer
+- Metrics charts
+- Event timeline
+- Chaos controls
+- Snapshot controls
+- Health table
+
+## Dashboard Runbook
+
+### Local development
+
+```bash
+npm install
+npm run dev
+```
+
+The dashboard reads `RAFTLAB_NODE_URLS` from the environment and expects management API URLs such as:
+
+```bash
+RAFTLAB_NODE_URLS=http://localhost:8081,http://localhost:8082,http://localhost:8083,http://localhost:8084,http://localhost:8085
+```
+
+### Docker
+
+```bash
+docker build -t raftlab-dashboard:local -f dashboard/Dockerfile .
+docker run --rm -p 3000:3000 \
+  -e RAFTLAB_NODE_URLS=http://host.docker.internal:8081,http://host.docker.internal:8082,http://host.docker.internal:8083,http://host.docker.internal:8084,http://host.docker.internal:8085 \
+  raftlab-dashboard:local
+```
+
+### Kubernetes
+
+```bash
+kubectl apply -k dashboard/deployments/kubernetes
+```
 
 ## Management API
 

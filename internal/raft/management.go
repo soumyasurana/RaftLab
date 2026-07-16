@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/soumyasurana/RaftLab/internal/api"
+	"github.com/soumyasurana/RaftLab/internal/chaos"
 	"github.com/soumyasurana/RaftLab/internal/snapshot"
 	"github.com/soumyasurana/RaftLab/pkg/types"
 )
@@ -89,10 +90,15 @@ func (n *Node) Status(ctx context.Context) (api.StatusResponse, error) {
 		return api.StatusResponse{}, err
 	}
 	if exists {
+		sizeBytes, _, err := n.snapshotStore.Size()
+		if err != nil {
+			return api.StatusResponse{}, err
+		}
 		status.Snapshot = api.SnapshotStatus{
 			Available:         true,
 			LastIncludedIndex: snap.LastIncludedIndex,
 			LastIncludedTerm:  snap.LastIncludedTerm,
+			SizeBytes:         sizeBytes,
 		}
 	} else {
 		status.Snapshot = api.SnapshotStatus{
@@ -103,6 +109,49 @@ func (n *Node) Status(ctx context.Context) (api.StatusResponse, error) {
 	}
 
 	return status, nil
+}
+
+// ChaosStatus returns the controller state used by the dashboard.
+func (n *Node) ChaosStatus(ctx context.Context) (api.ChaosStatusResponse, error) {
+	ctx = contextOrBackground(ctx)
+	if err := ctx.Err(); err != nil {
+		return api.ChaosStatusResponse{}, err
+	}
+
+	if n.chaosController == nil {
+		return api.ChaosStatusResponse{}, fmt.Errorf("chaos controller is not configured")
+	}
+
+	snapshot := n.chaosController.Snapshot()
+	result := api.ChaosStatusResponse{
+		Enabled:               snapshot.Config.Enabled,
+		PacketDropProbability: snapshot.Config.PacketDropProbability,
+		MinDelayMs:            int64(snapshot.Config.MinDelay / time.Millisecond),
+		MaxDelayMs:            int64(snapshot.Config.MaxDelay / time.Millisecond),
+		Partitions:            make([]api.ChaosPartition, 0, len(snapshot.Config.Partitions)),
+		Nodes:                 make(map[string]api.ChaosNodeState, len(snapshot.Nodes)),
+	}
+
+	for _, partition := range snapshot.Config.Partitions {
+		groupStrings := make([][]string, 0, len(partition.Groups))
+		for _, group := range partition.Groups {
+			nodes := make([]string, 0, len(group))
+			for _, nodeID := range group {
+				nodes = append(nodes, string(nodeID))
+			}
+			groupStrings = append(groupStrings, nodes)
+		}
+		result.Partitions = append(result.Partitions, api.ChaosPartition{Groups: groupStrings})
+	}
+
+	for nodeID, state := range snapshot.Nodes {
+		result.Nodes[string(nodeID)] = api.ChaosNodeState{
+			Disconnected: state.Disconnected,
+			Crashed:      state.Crashed,
+		}
+	}
+
+	return result, nil
 }
 
 // Peers returns the local view of every configured peer.
@@ -248,6 +297,125 @@ func (n *Node) ResetChaos(ctx context.Context) error {
 	}
 
 	n.chaosController.Reset()
+	return nil
+}
+
+// SetChaosLatency updates the simulated delay window.
+func (n *Node) SetChaosLatency(ctx context.Context, minDelay time.Duration, maxDelay time.Duration) error {
+	ctx = contextOrBackground(ctx)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	if n.chaosController == nil {
+		return fmt.Errorf("chaos controller is not configured")
+	}
+
+	n.chaosController.SetLatency(minDelay, maxDelay)
+	return nil
+}
+
+// SetChaosPacketLoss updates the simulated packet loss rate.
+func (n *Node) SetChaosPacketLoss(ctx context.Context, probability float64) error {
+	ctx = contextOrBackground(ctx)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	if n.chaosController == nil {
+		return fmt.Errorf("chaos controller is not configured")
+	}
+
+	n.chaosController.SetPacketDropProbability(probability)
+	return nil
+}
+
+// SetChaosPartition updates the injected topology split.
+func (n *Node) SetChaosPartition(ctx context.Context, groups [][]string) error {
+	ctx = contextOrBackground(ctx)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	if n.chaosController == nil {
+		return fmt.Errorf("chaos controller is not configured")
+	}
+
+	partitions := make([]chaos.Partition, 0, len(groups))
+	for _, group := range groups {
+		nodes := make([]types.NodeID, 0, len(group))
+		for _, nodeID := range group {
+			if nodeID == "" {
+				continue
+			}
+			nodes = append(nodes, types.NodeID(nodeID))
+		}
+		if len(nodes) > 0 {
+			partitions = append(partitions, chaos.Partition{Groups: [][]types.NodeID{nodes}})
+		}
+	}
+
+	n.chaosController.SetPartitions(partitions...)
+	return nil
+}
+
+// CrashNode marks a node as crashed in the chaos controller.
+func (n *Node) CrashNode(ctx context.Context, nodeID string) error {
+	ctx = contextOrBackground(ctx)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	if n.chaosController == nil {
+		return fmt.Errorf("chaos controller is not configured")
+	}
+
+	n.chaosController.Crash(types.NodeID(nodeID))
+	return nil
+}
+
+// RestartNode clears the crash state for a node.
+func (n *Node) RestartNode(ctx context.Context, nodeID string) error {
+	ctx = contextOrBackground(ctx)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	if n.chaosController == nil {
+		return fmt.Errorf("chaos controller is not configured")
+	}
+
+	n.chaosController.Restart(types.NodeID(nodeID))
+	return nil
+}
+
+// DisconnectNode isolates a node from the cluster.
+func (n *Node) DisconnectNode(ctx context.Context, nodeID string) error {
+	ctx = contextOrBackground(ctx)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	if n.chaosController == nil {
+		return fmt.Errorf("chaos controller is not configured")
+	}
+
+	n.chaosController.Disconnect(types.NodeID(nodeID))
+	return nil
+}
+
+// ReconnectNode restores a disconnected node.
+func (n *Node) ReconnectNode(ctx context.Context, nodeID string) error {
+	ctx = contextOrBackground(ctx)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	if n.chaosController == nil {
+		return fmt.Errorf("chaos controller is not configured")
+	}
+
+	n.chaosController.Reconnect(types.NodeID(nodeID))
 	return nil
 }
 

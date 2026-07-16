@@ -1,0 +1,87 @@
+@import "@xyflow/react/dist/style.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  --background: 223 47% 6%;
+  --foreground: 210 40% 98%;
+  --card: 224 38% 10%;
+  --card-foreground: 210 40% 98%;
+  --popover: 224 38% 10%;
+  --popover-foreground: 210 40% 98%;
+  --primary: 166 100% 45%;
+  --primary-foreground: 222 47% 10%;
+  --secondary: 218 32% 16%;
+  --secondary-foreground: 210 40% 98%;
+  --muted: 219 28% 14%;
+  --muted-foreground: 215 20% 68%;
+  --accent: 184 84% 36%;
+  --accent-foreground: 210 40% 98%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 210 40% 98%;
+  --border: 219 22% 18%;
+  --input: 219 22% 18%;
+  --ring: 166 100% 45%;
+  --radius: 1rem;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+html {
+  min-height: 100%;
+  background:
+    radial-gradient(circle at top left, rgba(14, 165, 233, 0.18), transparent 30%),
+    radial-gradient(circle at top right, rgba(16, 185, 129, 0.12), transparent 24%),
+    linear-gradient(180deg, #050816 0%, #0a1020 48%, #04060d 100%);
+}
+
+body {
+  min-height: 100vh;
+  background: transparent;
+  color: hsl(var(--foreground));
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.3);
+}
+
+::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.28);
+}
+
+::selection {
+  background: rgba(52, 211, 153, 0.28);
+  color: white;
+}
+
+.glass {
+  background: rgba(10, 16, 32, 0.68);
+  backdrop-filter: blur(18px);
+}
+
+.grid-mask {
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.08) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+.dashboard-node-shadow {
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 16px 48px rgba(0, 0, 0, 0.35);
+}

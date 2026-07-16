@@ -18,6 +18,7 @@ type fakeManager struct {
 	state    map[string]string
 	metrics  MetricsResponse
 	snapshot SnapshotResponse
+	chaos    ChaosStatusResponse
 
 	healthErr   error
 	statusErr   error
@@ -27,9 +28,16 @@ type fakeManager struct {
 	snapshotErr error
 	chaosErr    error
 
-	enableCalled  int
-	disableCalled int
-	resetCalled   int
+	enableCalled     int
+	disableCalled    int
+	resetCalled      int
+	latencyCalled    int
+	packetCalled     int
+	partitionCalled  int
+	crashCalled      int
+	restartCalled    int
+	disconnectCalled int
+	reconnectCalled  int
 }
 
 func (f *fakeManager) Health(context.Context) (HealthResponse, error) {
@@ -68,6 +76,45 @@ func (f *fakeManager) DisableChaos(context.Context) error {
 
 func (f *fakeManager) ResetChaos(context.Context) error {
 	f.resetCalled++
+	return f.chaosErr
+}
+
+func (f *fakeManager) ChaosStatus(context.Context) (ChaosStatusResponse, error) {
+	return f.chaos, f.chaosErr
+}
+
+func (f *fakeManager) SetChaosLatency(context.Context, time.Duration, time.Duration) error {
+	f.latencyCalled++
+	return f.chaosErr
+}
+
+func (f *fakeManager) SetChaosPacketLoss(context.Context, float64) error {
+	f.packetCalled++
+	return f.chaosErr
+}
+
+func (f *fakeManager) SetChaosPartition(context.Context, [][]string) error {
+	f.partitionCalled++
+	return f.chaosErr
+}
+
+func (f *fakeManager) CrashNode(context.Context, string) error {
+	f.crashCalled++
+	return f.chaosErr
+}
+
+func (f *fakeManager) RestartNode(context.Context, string) error {
+	f.restartCalled++
+	return f.chaosErr
+}
+
+func (f *fakeManager) DisconnectNode(context.Context, string) error {
+	f.disconnectCalled++
+	return f.chaosErr
+}
+
+func (f *fakeManager) ReconnectNode(context.Context, string) error {
+	f.reconnectCalled++
 	return f.chaosErr
 }
 
@@ -117,6 +164,18 @@ func TestServerEndpoints(t *testing.T) {
 			RPCFailures:        1,
 			LeaderChanges:      3,
 			Uptime:             9 * time.Second,
+		},
+		chaos: ChaosStatusResponse{
+			Enabled:               true,
+			PacketDropProbability: 0.15,
+			MinDelayMs:            25,
+			MaxDelayMs:            120,
+			Partitions: []ChaosPartition{{
+				Groups: [][]string{{"node-1", "node-2"}, {"node-3"}},
+			}},
+			Nodes: map[string]ChaosNodeState{
+				"node-3": {Disconnected: true},
+			},
 		},
 		snapshot: SnapshotResponse{
 			SnapshotIndex: 41,
@@ -211,6 +270,21 @@ func TestServerEndpoints(t *testing.T) {
 				mustDecode(t, resp, &got)
 				if got.ElectionsWon != 2 || got.AppendEntriesSent != 11 || got.LeaderChanges != 3 {
 					t.Fatalf("unexpected metrics response: %+v", got)
+				}
+			},
+		},
+		{
+			name:            "chaos",
+			method:          http.MethodGet,
+			path:            "/chaos",
+			wantStatus:      http.StatusOK,
+			wantContentType: "application/json",
+			check: func(t *testing.T, resp *http.Response) {
+				t.Helper()
+				var got ChaosStatusResponse
+				mustDecode(t, resp, &got)
+				if !got.Enabled || got.PacketDropProbability != 0.15 || got.MinDelayMs != 25 || got.MaxDelayMs != 120 {
+					t.Fatalf("unexpected chaos response: %+v", got)
 				}
 			},
 		},

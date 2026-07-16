@@ -1,0 +1,13 @@
+{
+  "name": "raftlab",
+  "private": true,
+  "workspaces": [
+    "dashboard"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace dashboard",
+    "lint": "npm run lint --workspace dashboard",
+    "type-check": "npm run type-check --workspace dashboard",
+    "build": "npm run build --workspace dashboard"
+  }
+}

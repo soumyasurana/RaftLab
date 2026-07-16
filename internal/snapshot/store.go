@@ -54,3 +54,16 @@ func (s *FileStore) Load() (Snapshot, bool, error) {
 
 	return snap, true, nil
 }
+
+// Size returns the stored snapshot size in bytes.
+func (s *FileStore) Size() (uint64, bool, error) {
+	info, err := os.Stat(s.path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, false, nil
+		}
+		return 0, false, err
+	}
+
+	return uint64(info.Size()), true, nil
+}

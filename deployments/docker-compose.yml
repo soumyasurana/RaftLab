@@ -85,6 +85,25 @@ services:
     networks:
       - raft-network
 
+  dashboard:
+    container_name: raft-dashboard
+    build:
+      context: ..
+      dockerfile: dashboard/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      RAFTLAB_NODE_URLS: http://node1:8080,http://node2:8080,http://node3:8080,http://node4:8080,http://node5:8080
+    depends_on:
+      - node1
+      - node2
+      - node3
+      - node4
+      - node5
+    restart: unless-stopped
+    networks:
+      - raft-network
+
 networks:
   raft-network:
     driver: bridge

@@ -21,6 +21,14 @@ type Manager interface {
 	EnableChaos(ctx context.Context) error
 	DisableChaos(ctx context.Context) error
 	ResetChaos(ctx context.Context) error
+	ChaosStatus(ctx context.Context) (ChaosStatusResponse, error)
+	SetChaosLatency(ctx context.Context, minDelay time.Duration, maxDelay time.Duration) error
+	SetChaosPacketLoss(ctx context.Context, probability float64) error
+	SetChaosPartition(ctx context.Context, groups [][]string) error
+	CrashNode(ctx context.Context, nodeID string) error
+	RestartNode(ctx context.Context, nodeID string) error
+	DisconnectNode(ctx context.Context, nodeID string) error
+	ReconnectNode(ctx context.Context, nodeID string) error
 }
 
 // HealthResponse describes the node's liveness and identity.
@@ -51,6 +59,7 @@ type SnapshotStatus struct {
 	Available         bool   `json:"available"`
 	LastIncludedIndex uint64 `json:"lastIncludedIndex"`
 	LastIncludedTerm  uint64 `json:"lastIncludedTerm"`
+	SizeBytes         uint64 `json:"sizeBytes"`
 }
 
 // PeerResponse describes a cluster peer from the local node's perspective.
@@ -82,6 +91,48 @@ type SnapshotResponse struct {
 	SnapshotIndex uint64 `json:"snapshotIndex"`
 	SnapshotTerm  uint64 `json:"snapshotTerm"`
 	Success       bool   `json:"success"`
+}
+
+// ChaosNodeState describes node-level chaos state.
+type ChaosNodeState struct {
+	Disconnected bool `json:"disconnected"`
+	Crashed      bool `json:"crashed"`
+}
+
+// ChaosPartition describes a topology split injected into the cluster.
+type ChaosPartition struct {
+	Groups [][]string `json:"groups"`
+}
+
+// ChaosStatusResponse reports the current fault-injection configuration.
+type ChaosStatusResponse struct {
+	Enabled               bool                      `json:"enabled"`
+	PacketDropProbability float64                   `json:"packetDropProbability"`
+	MinDelayMs            int64                     `json:"minDelayMs"`
+	MaxDelayMs            int64                     `json:"maxDelayMs"`
+	Partitions            []ChaosPartition          `json:"partitions"`
+	Nodes                 map[string]ChaosNodeState `json:"nodes"`
+}
+
+// ChaosLatencyRequest updates the simulated latency range.
+type ChaosLatencyRequest struct {
+	MinDelayMs int64 `json:"minDelayMs"`
+	MaxDelayMs int64 `json:"maxDelayMs"`
+}
+
+// ChaosPacketLossRequest updates the packet loss probability.
+type ChaosPacketLossRequest struct {
+	Probability float64 `json:"probability"`
+}
+
+// ChaosPartitionRequest updates the active network partitions.
+type ChaosPartitionRequest struct {
+	Groups [][]string `json:"groups"`
+}
+
+// ChaosNodeRequest targets a specific node for failure injection.
+type ChaosNodeRequest struct {
+	NodeID string `json:"nodeId"`
 }
 
 // ActionResponse is a generic success envelope for control-plane actions.

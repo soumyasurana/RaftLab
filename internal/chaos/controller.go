@@ -16,6 +16,18 @@ type nodeState struct {
 	crashed      bool
 }
 
+// Snapshot captures the controller's current config and node states.
+type Snapshot struct {
+	Config Config
+	Nodes  map[types.NodeID]ChaosNodeState
+}
+
+// ChaosNodeState is the exported view of a node's injected fault state.
+type ChaosNodeState struct {
+	Disconnected bool
+	Crashed      bool
+}
+
 // Controller owns global chaos state and creates node-scoped transports.
 type Controller struct {
 	mu sync.Mutex
@@ -91,6 +103,42 @@ func (c *Controller) Reset() {
 	}
 }
 
+// Snapshot returns a copy of the current controller configuration.
+func (c *Controller) Snapshot() Snapshot {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	nodes := make(map[types.NodeID]ChaosNodeState, len(c.nodes))
+	for nodeID, state := range c.nodes {
+		nodes[nodeID] = ChaosNodeState{
+			Disconnected: state.disconnected,
+			Crashed:      state.crashed,
+		}
+	}
+
+	return Snapshot{
+		Config: c.cfg,
+		Nodes:  nodes,
+	}
+}
+
+// SetLatency updates the simulated delay window.
+func (c *Controller) SetLatency(minDelay, maxDelay time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.cfg.MinDelay = minDelay
+	c.cfg.MaxDelay = maxDelay
+}
+
+// SetPacketDropProbability updates the packet loss rate.
+func (c *Controller) SetPacketDropProbability(probability float64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.cfg.PacketDropProbability = probability
+}
+
 // Disconnect prevents the node from sending or receiving traffic.
 func (c *Controller) Disconnect(nodeID types.NodeID) {
 	c.mu.Lock()
@@ -125,6 +173,34 @@ func (c *Controller) Restart(nodeID types.NodeID) {
 
 	state := c.ensureNodeLocked(nodeID)
 	state.crashed = false
+}
+
+// SetPartitions replaces the partition topology using the provided groups.
+func (c *Controller) SetPartitionsFromStrings(groups [][]string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	partitions := make([]Partition, 0, 1)
+	if len(groups) > 0 {
+		converted := make([][]types.NodeID, 0, len(groups))
+		for _, group := range groups {
+			nodes := make([]types.NodeID, 0, len(group))
+			for _, nodeID := range group {
+				if nodeID == "" {
+					continue
+				}
+				nodes = append(nodes, types.NodeID(nodeID))
+			}
+			if len(nodes) > 0 {
+				converted = append(converted, nodes)
+			}
+		}
+		if len(converted) > 0 {
+			partitions = append(partitions, Partition{Groups: converted})
+		}
+	}
+
+	c.cfg.Partitions = partitions
 }
 
 func (c *Controller) ensureNodeLocked(nodeID types.NodeID) *nodeState {

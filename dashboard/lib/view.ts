@@ -59,7 +59,9 @@ function newestEvent(
   nodeId?: string,
 ): TimelineEvent {
   return {
-    id: `${type}-${nodeId ?? "cluster"}-${crypto.randomUUID()}`,
+    id: `${type}-${nodeId ?? "cluster"}-${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2, 8)}`,
     type,
     title,
     detail,

@@ -268,7 +268,7 @@ Upon completion, RaftLab will demonstrate practical understanding of:
 | Persistent WAL           | ✅ Completed |
 | Replicated State Machine | ✅ Completed |
 | Fault Injection          | ✅ Completed |
-| HTTP API                 | ✅ Completed   |
+| HTTP API                 | ✅ Completed |
 | Interactive Dashboard    | ⏳ Future    |
 | Snapshotting             | ⏳ Future    |
 | Production Enhancements  | ⏳ Future    |

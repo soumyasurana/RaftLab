@@ -1,0 +1,114 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: raft
+spec:
+  serviceName: raft
+  replicas: 5
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: raft
+  template:
+    metadata:
+      labels:
+        app: raft
+    spec:
+      terminationGracePeriodSeconds: 30
+      volumes:
+        - name: config
+          configMap:
+            name: raft-config
+      containers:
+        - name: raft
+          image: raftlab:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: grpc
+              containerPort: 50051
+            - name: http
+              containerPort: 8080
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: CONFIG_PATH
+              value: /app/config.yaml
+            - name: API_ADDRESS
+              value: :8080
+            - name: BUILD_VERSION
+              value: kubernetes
+            - name: RAFT_WAL_PATH
+              value: /var/lib/raft/wal/raft.wal
+            - name: RAFT_METADATA_PATH
+              value: /var/lib/raft/metadata/metadata.json
+            - name: RAFT_SNAPSHOT_DIR
+              value: /var/lib/raft/snapshots
+          volumeMounts:
+            - name: config
+              mountPath: /app/config.yaml
+              subPathExpr: $(POD_NAME).yaml
+              readOnly: true
+            - name: wal
+              mountPath: /var/lib/raft/wal
+            - name: metadata
+              mountPath: /var/lib/raft/metadata
+            - name: snapshots
+              mountPath: /var/lib/raft/snapshots
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: wal
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
+    - metadata:
+        name: metadata
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 256Mi
+    - metadata:
+        name: snapshots
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi

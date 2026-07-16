@@ -1,0 +1,85 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: raft-config
+data:
+  raft-0.yaml: |
+    id: raft-0
+    address: raft-0.raft.default.svc.cluster.local:50051
+    data_dir: /var/lib/raft
+    snapshot_threshold: 100
+    election_timeout: 750ms
+    heartbeat_timeout: 150ms
+    peers:
+      - id: raft-1
+        address: raft-1.raft.default.svc.cluster.local:50051
+      - id: raft-2
+        address: raft-2.raft.default.svc.cluster.local:50051
+      - id: raft-3
+        address: raft-3.raft.default.svc.cluster.local:50051
+      - id: raft-4
+        address: raft-4.raft.default.svc.cluster.local:50051
+  raft-1.yaml: |
+    id: raft-1
+    address: raft-1.raft.default.svc.cluster.local:50051
+    data_dir: /var/lib/raft
+    snapshot_threshold: 100
+    election_timeout: 750ms
+    heartbeat_timeout: 150ms
+    peers:
+      - id: raft-0
+        address: raft-0.raft.default.svc.cluster.local:50051
+      - id: raft-2
+        address: raft-2.raft.default.svc.cluster.local:50051
+      - id: raft-3
+        address: raft-3.raft.default.svc.cluster.local:50051
+      - id: raft-4
+        address: raft-4.raft.default.svc.cluster.local:50051
+  raft-2.yaml: |
+    id: raft-2
+    address: raft-2.raft.default.svc.cluster.local:50051
+    data_dir: /var/lib/raft
+    snapshot_threshold: 100
+    election_timeout: 750ms
+    heartbeat_timeout: 150ms
+    peers:
+      - id: raft-0
+        address: raft-0.raft.default.svc.cluster.local:50051
+      - id: raft-1
+        address: raft-1.raft.default.svc.cluster.local:50051
+      - id: raft-3
+        address: raft-3.raft.default.svc.cluster.local:50051
+      - id: raft-4
+        address: raft-4.raft.default.svc.cluster.local:50051
+  raft-3.yaml: |
+    id: raft-3
+    address: raft-3.raft.default.svc.cluster.local:50051
+    data_dir: /var/lib/raft
+    snapshot_threshold: 100
+    election_timeout: 750ms
+    heartbeat_timeout: 150ms
+    peers:
+      - id: raft-0
+        address: raft-0.raft.default.svc.cluster.local:50051
+      - id: raft-1
+        address: raft-1.raft.default.svc.cluster.local:50051
+      - id: raft-2
+        address: raft-2.raft.default.svc.cluster.local:50051
+      - id: raft-4
+        address: raft-4.raft.default.svc.cluster.local:50051
+  raft-4.yaml: |
+    id: raft-4
+    address: raft-4.raft.default.svc.cluster.local:50051
+    data_dir: /var/lib/raft
+    snapshot_threshold: 100
+    election_timeout: 750ms
+    heartbeat_timeout: 150ms
+    peers:
+      - id: raft-0
+        address: raft-0.raft.default.svc.cluster.local:50051
+      - id: raft-1
+        address: raft-1.raft.default.svc.cluster.local:50051
+      - id: raft-2
+        address: raft-2.raft.default.svc.cluster.local:50051
+      - id: raft-3
+        address: raft-3.raft.default.svc.cluster.local:50051

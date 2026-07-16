@@ -60,6 +60,18 @@ View the cluster logs:
 docker compose -f deployments/docker-compose.yml logs -f
 ```
 
+### Run on Kubernetes
+
+The Kubernetes deployment guide lives in [`deployments/kubernetes/README.md`](Raftlab/deployments/kubernetes/README.md).
+
+It covers:
+
+- StatefulSet-based deployment
+- Headless peer discovery
+- Persistent storage layout
+- Health checks and resource limits
+- `kubectl` commands for rollout, logs, exec, and port-forwarding
+
 ---
 
 ## Project Status
@@ -91,8 +103,8 @@ docker compose -f deployments/docker-compose.yml logs -f
 - ✅ Chaos controller
 - ✅ Fiber management API
 - ⏳ WebSocket Event Stream
-- ⬜ Next.js dashboard
-- ⬜ Kubernetes Deployment (StatefulSet, PVCs, Services)
+- ⏳ Next.js dashboard
+- ✅ Kubernetes Deployment (StatefulSet, PVCs, Services)
 
 ---
 

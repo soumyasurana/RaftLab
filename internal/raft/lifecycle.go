@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"os"
 	"time"
 
 	"github.com/soumyasurana/RaftLab/internal/chaos"
@@ -20,8 +21,12 @@ func NewWithTransport(
 	cfg *config.Config,
 	transport rpc.Transport,
 ) (*Node, error) {
+	walPath := envOrDefault("RAFT_WAL_PATH", cfg.Node.DataDir+"/raft.wal")
+	metadataPath := envOrDefault("RAFT_METADATA_PATH", cfg.Node.DataDir+"/metadata.json")
+	snapshotDir := envOrDefault("RAFT_SNAPSHOT_DIR", cfg.Node.DataDir)
+
 	metaStore, err := metadata.Open(
-		cfg.Node.DataDir + "/metadata.json",
+		metadataPath,
 	)
 	if err != nil {
 		return nil, err
@@ -33,7 +38,7 @@ func NewWithTransport(
 	}
 
 	log, err := wal.Open(
-		cfg.Node.DataDir + "/raft.wal",
+		walPath,
 	)
 	if err != nil {
 		return nil, err
@@ -45,7 +50,7 @@ func NewWithTransport(
 		return nil, err
 	}
 
-	snapshotStore := snapshot.NewFileStore(cfg.Node.DataDir)
+	snapshotStore := snapshot.NewFileStore(snapshotDir)
 	snap, exists, err := snapshotStore.Load()
 	if err != nil {
 		return nil, err
@@ -150,4 +155,12 @@ func (n *Node) Stop() error {
 	}
 
 	return walErr
+}
+
+func envOrDefault(name string, fallback string) string {
+	if value := os.Getenv(name); value != "" {
+		return value
+	}
+
+	return fallback
 }

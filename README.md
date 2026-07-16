@@ -62,7 +62,7 @@ docker compose -f deployments/docker-compose.yml logs -f
 
 ### Run on Kubernetes
 
-The Kubernetes deployment guide lives in [`deployments/kubernetes/README.md`](Raftlab/deployments/kubernetes/README.md).
+The Kubernetes deployment guide lives in [`deployments/kubernetes/README.md`](deployments/kubernetes/README.md).
 
 It covers:
 

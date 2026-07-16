@@ -28,4 +28,5 @@ COPY --from=builder /app/dashboard/.next/static ./dashboard/.next/static
 
 EXPOSE 3000
 
+WORKDIR /app/dashboard
 CMD ["node", "server.js"]

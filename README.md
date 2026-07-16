@@ -123,15 +123,6 @@ It covers:
 - Health checks and resource limits
 - `kubectl` commands for rollout, logs, exec, and port-forwarding
 
-The dashboard has its own deployment in [`dashboard/deployments/kubernetes/README.md`](dashboard/deployments/kubernetes/README.md).
-
-It covers:
-
-- Separate Next.js deployment and service
-- Ingress-ready exposure
-- Management API URLs wired through ConfigMap
-- Dashboard-specific Docker build
-
 ---
 
 ## Project Status
@@ -245,12 +236,6 @@ docker build -t raftlab-dashboard:local -f dashboard/Dockerfile .
 docker run --rm -p 3000:3000 \
   -e RAFTLAB_NODE_URLS=http://host.docker.internal:8081,http://host.docker.internal:8082,http://host.docker.internal:8083,http://host.docker.internal:8084,http://host.docker.internal:8085 \
   raftlab-dashboard:local
-```
-
-### Kubernetes
-
-```bash
-kubectl apply -k dashboard/deployments/kubernetes
 ```
 
 ## Management API

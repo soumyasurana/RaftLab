@@ -25,7 +25,6 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 COPY --from=builder /app/dashboard/.next/standalone ./
 COPY --from=builder /app/dashboard/.next/static ./dashboard/.next/static
-COPY --from=builder /app/dashboard/public ./dashboard/public
 
 EXPOSE 3000
 

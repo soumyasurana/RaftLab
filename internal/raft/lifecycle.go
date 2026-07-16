@@ -1,6 +1,9 @@
 package raft
 
 import (
+	"time"
+
+	"github.com/soumyasurana/RaftLab/internal/chaos"
 	"github.com/soumyasurana/RaftLab/internal/config"
 	"github.com/soumyasurana/RaftLab/internal/rpc"
 	"github.com/soumyasurana/RaftLab/internal/snapshot"
@@ -60,7 +63,8 @@ func NewWithTransport(
 	}
 
 	node := &Node{
-		config: cfg,
+		config:    cfg,
+		startedAt: time.Now().UTC(),
 
 		persistent: PersistentState{
 			CurrentTerm: uint64(persistentState.CurrentTerm),
@@ -90,10 +94,13 @@ func NewWithTransport(
 	node.role = Follower
 
 	// Join the cluster
-	rpcClient := transport
-	if rpcClient == nil {
-		rpcClient = rpc.NewClient(string(cfg.Node.ID))
+	baseTransport := transport
+	if baseTransport == nil {
+		baseTransport = rpc.NewClient(string(cfg.Node.ID))
 	}
+
+	node.chaosController = chaos.NewController(chaos.Config{})
+	rpcClient := node.chaosController.Wrap(cfg.Node.ID, baseTransport)
 
 	for _, peer := range cfg.Node.Peers {
 		if err := rpcClient.Connect(

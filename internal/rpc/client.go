@@ -72,6 +72,15 @@ func (c *Client) Connect(peerID string, address string) error {
 	return nil
 }
 
+// Connected reports whether a peer currently has an active connection.
+func (c *Client) Connected(peerID string) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	_, ok := c.connections[peerID]
+	return ok
+}
+
 // RequestVote sends a RequestVote RPC to a peer.
 func (c *Client) RequestVote(
 	ctx context.Context,

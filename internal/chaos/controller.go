@@ -74,6 +74,23 @@ func (c *Controller) ClearPartitions() {
 	c.SetPartitions()
 }
 
+// Reset clears all injected faults and restores the controller to a clean state.
+func (c *Controller) Reset() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.cfg.Enabled = false
+	c.cfg.PacketDropProbability = 0
+	c.cfg.MinDelay = 0
+	c.cfg.MaxDelay = 0
+	c.cfg.Partitions = nil
+
+	for _, state := range c.nodes {
+		state.disconnected = false
+		state.crashed = false
+	}
+}
+
 // Disconnect prevents the node from sending or receiving traffic.
 func (c *Controller) Disconnect(nodeID types.NodeID) {
 	c.mu.Lock()

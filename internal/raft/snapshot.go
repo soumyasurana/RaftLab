@@ -67,6 +67,8 @@ func (n *Node) takeSnapshot() error {
 		return err
 	}
 
+	n.metrics.SnapshotsCreated++
+
 	n.volatile.LastIncludedIndex = snapshotIndex
 	n.volatile.LastIncludedTerm = snapshotTerm
 

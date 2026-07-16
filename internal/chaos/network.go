@@ -18,6 +18,10 @@ func (t *transport) Connect(peerID string, address string) error {
 	return t.base.Connect(peerID, address)
 }
 
+func (t *transport) Connected(peerID string) bool {
+	return t.base.Connected(peerID)
+}
+
 func (t *transport) RequestVote(
 	ctx context.Context,
 	peerID string,

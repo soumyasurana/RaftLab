@@ -89,9 +89,10 @@ docker compose -f deployments/docker-compose.yml logs -f
 - ✅ Crash recovery
 - ✅ Snapshots
 - ✅ Chaos controller
-- ⬜ Fiber management API
-- ⬜ WebSocket event stream
+- ✅ Fiber management API
+- ⏳ WebSocket Event Stream
 - ⬜ Next.js dashboard
+- ⬜ Kubernetes Deployment (StatefulSet, PVCs, Services)
 
 ---
 
@@ -137,6 +138,46 @@ docker compose -f deployments/docker-compose.yml logs -f
 - Cluster health monitoring
 - Runtime metrics
 - Live cluster visualization
+
+## Management API
+
+Each node now starts a Fiber-based management API on `API_ADDRESS` if set, or `:8080` by default.
+
+### Endpoints
+
+- `GET /health`
+- `GET /status`
+- `GET /peers`
+- `GET /state`
+- `GET /metrics`
+- `POST /snapshot`
+- `POST /chaos/enable`
+- `POST /chaos/disable`
+- `POST /chaos/reset`
+
+### Example `curl` commands
+
+```bash
+curl http://localhost:8080/health
+curl http://localhost:8080/status
+curl http://localhost:8080/peers
+curl http://localhost:8080/state
+curl http://localhost:8080/metrics
+curl -X POST http://localhost:8080/snapshot
+curl -X POST http://localhost:8080/chaos/enable
+curl -X POST http://localhost:8080/chaos/disable
+curl -X POST http://localhost:8080/chaos/reset
+```
+
+### Response shapes
+
+- `/health` returns node identity, role, current term, leader id, uptime, and build version.
+- `/status` returns Raft state, log length, and snapshot metadata.
+- `/peers` returns peer address, connection state, and replication indexes.
+- `/state` returns the full replicated key-value store as JSON.
+- `/metrics` returns election, replication, snapshot, RPC, and uptime counters.
+- `/snapshot` returns the snapshot index, term, and success flag.
+- `/chaos/*` returns a simple success envelope.
 
 ---
 

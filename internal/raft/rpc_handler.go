@@ -47,6 +47,12 @@ func (n *Node) HandleRequestVote(
 	voteGranted := canVote && candidateLogIsUpToDate
 
 	if voteGranted {
+		n.metrics.VotesGranted++
+	} else {
+		n.metrics.VotesRejected++
+	}
+
+	if voteGranted {
 		n.persistent.VotedFor = types.NodeID(req.CandidateId)
 		if err := n.persistLocked(); err != nil {
 			return nil, err
@@ -68,6 +74,7 @@ func (n *Node) HandleAppendEntries(
 ) (*pb.AppendEntriesResponse, error) {
 
 	n.mu.Lock()
+	n.metrics.AppendEntriesRecv++
 
 	// Reject stale leaders.
 	if req.Term < n.persistent.CurrentTerm {
@@ -90,6 +97,7 @@ func (n *Node) HandleAppendEntries(
 	} else if n.role != Follower {
 		n.role = Follower
 	}
+	n.leaderID = types.NodeID(req.LeaderId)
 
 	// Verify PrevLogIndex exists.
 	if req.PrevLogIndex > 0 {
@@ -168,14 +176,26 @@ func (n *Node) HandleAppendEntries(
 // becomeFollowerLocked transitions the node to follower state.
 // The caller must hold n.mu.
 func (n *Node) becomeFollowerLocked(term uint64) {
+	wasLeader := n.role == Leader
+	wasCandidate := n.role == Candidate
+
 	if n.heartbeat != nil {
 		n.heartbeat.stop()
 	}
 	n.role = Follower
+	n.leaderID = ""
 	n.persistent.CurrentTerm = term
 	n.persistent.VotedFor = ""
 	if err := n.persistLocked(); err != nil {
 		log.Printf("persist metadata: %v", err)
+	}
+
+	if wasLeader {
+		n.metrics.LeaderChanges++
+	}
+
+	if wasCandidate {
+		n.metrics.ElectionsLost++
 	}
 }
 
@@ -230,6 +250,8 @@ func (n *Node) HandleInstallSnapshot(
 	if err := n.stateMachine.Restore(req.Data); err != nil {
 		return nil, err
 	}
+
+	n.metrics.SnapshotsInstalled++
 
 	// Update snapshot store
 	snap := snapshot.Snapshot{

@@ -72,6 +72,10 @@ func (n *Node) replicateToPeer(peerID string) {
 	)
 	defer cancel()
 
+	n.mu.Lock()
+	n.metrics.AppendEntriesSent++
+	n.mu.Unlock()
+
 	response, err := n.rpcClient.AppendEntries(
 		ctx,
 		peerID,
@@ -86,6 +90,9 @@ func (n *Node) replicateToPeer(peerID string) {
 	)
 
 	if err != nil {
+		n.mu.Lock()
+		n.metrics.RPCFailures++
+		n.mu.Unlock()
 		return
 	}
 
@@ -166,6 +173,9 @@ func (n *Node) sendInstallSnapshot(peerID string) {
 
 	resp, err := n.rpcClient.InstallSnapshot(ctx, peerID, req)
 	if err != nil {
+		n.mu.Lock()
+		n.metrics.RPCFailures++
+		n.mu.Unlock()
 		return
 	}
 

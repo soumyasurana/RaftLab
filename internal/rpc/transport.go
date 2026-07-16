@@ -9,6 +9,7 @@ import (
 // Transport is the minimal client-side RPC contract used by Raft.
 type Transport interface {
 	Connect(peerID string, address string) error
+	Connected(peerID string) bool
 	RequestVote(
 		ctx context.Context,
 		peerID string,

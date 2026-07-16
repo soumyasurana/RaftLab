@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/soumyasurana/RaftLab/internal/api"
 	"github.com/soumyasurana/RaftLab/internal/config"
 	"github.com/soumyasurana/RaftLab/internal/raft"
 	"github.com/soumyasurana/RaftLab/internal/rpc"
@@ -37,12 +38,25 @@ func main() {
 		log.Fatalf("create Raft node: %v", err)
 	}
 
+	apiAddr := os.Getenv("API_ADDRESS")
+	if apiAddr == "" {
+		apiAddr = ":8080"
+	}
+
+	buildVersion := os.Getenv("BUILD_VERSION")
+	if buildVersion == "" {
+		buildVersion = api.DefaultBuildVersion
+	}
+
+	managementAPI := api.NewServer(node, api.WithBuildVersion(buildVersion))
+
 	rpcServer := rpc.NewServer(
 		cfg.Node.Address,
 		node,
 	)
 
 	serverErrCh := make(chan error, 1)
+	apiErrCh := make(chan error, 1)
 
 	go func() {
 		log.Printf(
@@ -52,6 +66,16 @@ func main() {
 		)
 
 		serverErrCh <- rpcServer.Start()
+	}()
+
+	go func() {
+		log.Printf(
+			"starting management API: node=%s address=%s",
+			cfg.Node.ID,
+			apiAddr,
+		)
+
+		apiErrCh <- managementAPI.Listen(apiAddr)
 	}()
 
 	node.Start()
@@ -84,6 +108,14 @@ func main() {
 				err,
 			)
 		}
+
+	case err := <-apiErrCh:
+		if err != nil {
+			log.Printf(
+				"management API stopped with error: %v",
+				err,
+			)
+		}
 	}
 
 	log.Printf(
@@ -92,6 +124,12 @@ func main() {
 	)
 
 	rpcServer.Stop()
+	if err := managementAPI.Shutdown(); err != nil {
+		log.Printf(
+			"stop management API: %v",
+			err,
+		)
+	}
 
 	if err := node.Stop(); err != nil {
 		log.Printf(

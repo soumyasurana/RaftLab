@@ -34,6 +34,10 @@ func (m *mockTransport) Connect(peerID string, address string) error {
 	return nil
 }
 
+func (m *mockTransport) Connected(string) bool {
+	return true
+}
+
 func (m *mockTransport) RequestVote(
 	_ context.Context,
 	peerID string,

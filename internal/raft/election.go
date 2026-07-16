@@ -149,6 +149,12 @@ func (n *Node) handleElectionTimeout() {
 	}
 
 	wg.Wait()
+
+	n.mu.Lock()
+	if n.role == Candidate && n.persistent.CurrentTerm == electionTerm {
+		n.metrics.ElectionsLost++
+	}
+	n.mu.Unlock()
 }
 
 // becomeLeader promotes the node only if the election is still current.
@@ -165,6 +171,9 @@ func (n *Node) becomeLeader(electionTerm uint64) {
 	}
 
 	n.role = Leader
+	n.leaderID = n.config.Node.ID
+	n.metrics.ElectionsWon++
+	n.metrics.LeaderChanges++
 	lastIndex, _, err := n.lastLogInfoLocked()
 	if err != nil {
 		return

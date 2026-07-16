@@ -266,9 +266,9 @@ Upon completion, RaftLab will demonstrate practical understanding of:
 | Leader Election          | ✅ Completed |
 | Log Replication          | ✅ Completed |
 | Persistent WAL           | ✅ Completed |
-| Replicated State Machine | ⏳ Planned   |
-| Fault Injection          | ⏳ Planned   |
-| HTTP API                 | ⏳ Planned   |
+| Replicated State Machine | ✅ Completed |
+| Fault Injection          | ✅ Completed |
+| HTTP API                 | ✅ Completed   |
 | Interactive Dashboard    | ⏳ Future    |
 | Snapshotting             | ⏳ Future    |
 | Production Enhancements  | ⏳ Future    |

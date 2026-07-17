@@ -526,12 +526,11 @@ export function DashboardApp() {
 
     const leaderX = 380;
     const leaderY = 80;
-    const followerCols = Math.min(3, Math.max(2, Math.ceil(Math.sqrt(Math.max(1, followers.length)))));
+    const followerCols = followers.length;
     const followerSpacingX = 320;
-    const followerSpacingY = 230;
     const gridWidth = (followerCols - 1) * followerSpacingX;
     const startX = leaderX - gridWidth / 2;
-    const startY = 340;
+    const startY = 520;
 
     nodes.forEach((node, index) => {
       const key = getNodeKey(node, index);
@@ -539,11 +538,11 @@ export function DashboardApp() {
       let y = leaderY;
 
       if (key !== leaderKey) {
-        const followerIndex = followers.findIndex((candidate, candidateIndex) => getNodeKey(candidate, candidateIndex) === key);
-        const row = Math.floor(Math.max(0, followerIndex) / followerCols);
-        const col = Math.max(0, followerIndex) % followerCols;
-        x = startX + col * followerSpacingX;
-        y = startY + row * followerSpacingY;
+        const followerIndex = followers.findIndex(
+          (candidate, candidateIndex) => getNodeKey(candidate, candidateIndex) === key,
+        );
+        x = startX + Math.max(0, followerIndex) * followerSpacingX;
+        y = startY;
       }
 
       flowNodes.push({
@@ -570,7 +569,7 @@ export function DashboardApp() {
           source: leaderId,
           target: followerKey,
           animated: true,
-          type: "smoothstep",
+          type: "straight",
           markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: "#34d399" },
           style: { strokeWidth: 2.4, stroke: "#34d399", opacity: 0.7 },
         });

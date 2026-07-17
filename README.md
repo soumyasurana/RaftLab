@@ -29,33 +29,9 @@ RaftLab now includes a production-style Next.js dashboard that turns the cluster
 - Chaos controls for latency, packet loss, partitions, and node failure
 - Snapshot management and cluster health tables
 
-### Architecture
+### Demo
 
-```mermaid
-flowchart LR
-  subgraph Browser["Browser"]
-    UI["Next.js Dashboard"]
-  end
-
-  subgraph Dashboard["Dashboard Runtime"]
-    API["Next API routes"]
-  end
-
-  subgraph Cluster["Raft Cluster"]
-    N1["raft-0 management API"]
-    N2["raft-1 management API"]
-    N3["raft-2 management API"]
-    N4["raft-3 management API"]
-    N5["raft-4 management API"]
-  end
-
-  UI --> API
-  API --> N1
-  API --> N2
-  API --> N3
-  API --> N4
-  API --> N5
-```
+https://github.com/user-attachments/assets/4630a355-8c23-46b4-9cc0-69732771f738
 
 ---
 

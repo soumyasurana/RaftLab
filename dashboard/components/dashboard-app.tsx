@@ -524,14 +524,14 @@ export function DashboardApp() {
     const leaderKey = leaderNode ? getNodeKey(leaderNode, nodes.indexOf(leaderNode)) : undefined;
     const followers = nodes.filter((node, index) => getNodeKey(node, index) !== leaderKey);
 
-    const leaderX = 360;
-    const leaderY = 100;
+    const leaderX = 380;
+    const leaderY = 80;
     const followerCols = Math.min(3, Math.max(2, Math.ceil(Math.sqrt(Math.max(1, followers.length)))));
-    const followerSpacingX = 250;
-    const followerSpacingY = 170;
+    const followerSpacingX = 320;
+    const followerSpacingY = 230;
     const gridWidth = (followerCols - 1) * followerSpacingX;
     const startX = leaderX - gridWidth / 2;
-    const startY = 280;
+    const startY = 340;
 
     nodes.forEach((node, index) => {
       const key = getNodeKey(node, index);
@@ -937,14 +937,14 @@ export function DashboardApp() {
               </div>
             }
           >
-            <div className="h-[620px] overflow-hidden rounded-[1.75rem] border border-white/8 bg-slate-950/80">
+            <div className="h-[760px] overflow-hidden rounded-[1.75rem] border border-white/8 bg-slate-950/80">
               {cluster ? (
                 <ReactFlow
                   nodes={flow.flowNodes}
                   edges={flow.flowEdges}
                   nodeTypes={{ clusterNode: ClusterNodeView }}
                   fitView
-                  fitViewOptions={{ padding: 0.22, minZoom: 0.55, maxZoom: 1.2 }}
+                  fitViewOptions={{ padding: 0.32, minZoom: 0.5, maxZoom: 1.2 }}
                   proOptions={{ hideAttribution: true }}
                   nodesDraggable={false}
                   nodesConnectable={false}

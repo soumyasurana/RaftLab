@@ -28,11 +28,13 @@ import {
   Loader2,
   LucideIcon,
   Network,
+  PanelLeft,
   PlayCircle,
   RefreshCw,
   ShieldAlert,
   Sparkles,
   Zap,
+  X,
 } from "lucide-react";
 import {
   Area,
@@ -95,6 +97,14 @@ const SECTION_IDS = [
   "health",
 ];
 
+function getNodeKey(node: NodeSnapshot, index: number) {
+  return node.health?.nodeId ?? node.baseUrl ?? `node-${index + 1}`;
+}
+
+function getNodeLabel(node: NodeSnapshot, index: number) {
+  return node.health?.nodeId ?? node.baseUrl.match(/node\d+/i)?.[0] ?? `Node ${index + 1}`;
+}
+
 function SectionCard({
   title,
   description,
@@ -153,6 +163,7 @@ function StatusCard({ icon: Icon, label, value, detail, accent }: StatusCardProp
 
 type ClusterNodeData = {
   node: NodeSnapshot;
+  displayName: string;
   leaderId?: string;
   selected: boolean;
 };
@@ -184,7 +195,7 @@ function ClusterNodeView({ data }: NodeProps<Node<ClusterNodeData>>) {
   return (
     <div
       className={cn(
-        "min-w-[260px] rounded-3xl border p-4 text-left shadow-glow backdrop-blur-xl transition-transform duration-300",
+        "w-[250px] rounded-3xl border p-4 text-left shadow-glow backdrop-blur-xl transition-transform duration-300",
         roleTone(role),
         data.selected && "scale-[1.03] ring-2 ring-emerald-400/60",
       )}
@@ -192,7 +203,10 @@ function ClusterNodeView({ data }: NodeProps<Node<ClusterNodeData>>) {
       <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-0 !bg-emerald-300" />
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="text-sm font-semibold text-white">{data.node.health?.nodeId ?? "offline"}</div>
+          <div className="text-sm font-semibold text-white">{data.displayName}</div>
+          <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300/70">
+            {data.node.health?.nodeId ?? data.node.baseUrl}
+          </div>
           <div className="text-xs uppercase tracking-[0.18em] text-slate-300/80">
             {formatRole(role)}
           </div>
@@ -426,6 +440,7 @@ export function DashboardApp() {
   const [selectedNodeId, setSelectedNodeId] = useState<string>("");
   const [viewMode, setViewMode] = useState<ViewMode>("table");
   const [search, setSearch] = useState("");
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [notice, setNotice] = useState<{ tone: "success" | "error"; message: string } | null>(null);
   const [history, setHistory] = useState<ClusterResponse[]>([]);
   const [faultMode, setFaultMode] = useState<FaultMode>("latency");
@@ -444,12 +459,37 @@ export function DashboardApp() {
 
     setHistory((current) => [...current.slice(-14), cluster]);
 
-    if (!selectedNodeId) {
-      setSelectedNodeId(cluster.summary.leaderId ?? cluster.nodes[0]?.health?.nodeId ?? "");
+    const preferredNode =
+      cluster.nodes.find((node) => node.health?.nodeId === cluster.summary.leaderId) ?? cluster.nodes[0];
+
+    if (!selectedNodeId && preferredNode) {
+      setSelectedNodeId(getNodeKey(preferredNode, cluster.nodes.indexOf(preferredNode)));
     }
 
-    if (!targetNodeId) {
-      setTargetNodeId(cluster.summary.leaderId ?? cluster.nodes[0]?.health?.nodeId ?? "");
+    if (!targetNodeId && preferredNode) {
+      setTargetNodeId(getNodeKey(preferredNode, cluster.nodes.indexOf(preferredNode)));
+    }
+  }, [cluster, selectedNodeId, targetNodeId]);
+
+  useEffect(() => {
+    if (!cluster?.nodes.length) {
+      return;
+    }
+
+    const firstKey = getNodeKey(cluster.nodes[0], 0);
+    const hasSelectedNode = selectedNodeId
+      ? cluster.nodes.some((node, index) => getNodeKey(node, index) === selectedNodeId)
+      : true;
+    const hasTargetNode = targetNodeId
+      ? cluster.nodes.some((node, index) => getNodeKey(node, index) === targetNodeId)
+      : true;
+
+    if (selectedNodeId && !hasSelectedNode) {
+      setSelectedNodeId(firstKey);
+    }
+
+    if (targetNodeId && !hasTargetNode) {
+      setTargetNodeId(firstKey);
     }
   }, [cluster, selectedNodeId, targetNodeId]);
 
@@ -459,8 +499,11 @@ export function DashboardApp() {
   }, [notice]);
 
   const leader = cluster ? pickLeader(cluster.nodes) : undefined;
-  const selectedNode = cluster?.nodes.find((node) => node.health?.nodeId === selectedNodeId) ?? leader ?? cluster?.nodes[0];
-  const targetNode = cluster?.nodes.find((node) => node.health?.nodeId === targetNodeId) ?? leader ?? cluster?.nodes[0];
+  const selectedNode =
+    cluster?.nodes.find((node, index) => getNodeKey(node, index) === selectedNodeId) ?? leader ?? cluster?.nodes[0];
+  const targetNode =
+    cluster?.nodes.find((node, index) => getNodeKey(node, index) === targetNodeId) ?? leader ?? cluster?.nodes[0];
+  const selectedNodeKey = selectedNode ? getNodeKey(selectedNode, cluster?.nodes.indexOf(selectedNode) ?? 0) : undefined;
   const chaosNode = targetNode ?? selectedNode;
 
   const filteredStateEntries = useMemo(() => {
@@ -477,49 +520,55 @@ export function DashboardApp() {
     const flowNodes: Node[] = [];
     const flowEdges: Edge[] = [];
     const nodes = cluster?.nodes ?? [];
-      const leaderNode = pickLeader(nodes);
-    const followers = nodes.filter((node) => node.health?.nodeId !== leaderNode?.health?.nodeId);
+    const leaderNode = pickLeader(nodes);
+    const leaderKey = leaderNode ? getNodeKey(leaderNode, nodes.indexOf(leaderNode)) : undefined;
+    const followers = nodes.filter((node, index) => getNodeKey(node, index) !== leaderKey);
 
-    const radius = 260;
-    const centerX = 360;
-    const centerY = 260;
+    const leaderX = 360;
+    const leaderY = 100;
+    const followerCols = Math.min(3, Math.max(2, Math.ceil(Math.sqrt(Math.max(1, followers.length)))));
+    const followerSpacingX = 250;
+    const followerSpacingY = 170;
+    const gridWidth = (followerCols - 1) * followerSpacingX;
+    const startX = leaderX - gridWidth / 2;
+    const startY = 280;
 
     nodes.forEach((node, index) => {
-      let x = centerX;
-      let y = centerY;
+      const key = getNodeKey(node, index);
+      let x = leaderX;
+      let y = leaderY;
 
-      if (leaderNode?.health?.nodeId === node.health?.nodeId) {
-        x = centerX;
-        y = centerY - 110;
-      } else if (followers.length === 1) {
-        x = centerX;
-        y = centerY + 120;
-      } else if (followers.length > 0) {
-        const angle = (Math.PI * 2 * index) / followers.length;
-        x = centerX + Math.cos(angle) * radius;
-        y = centerY + Math.sin(angle) * radius;
+      if (key !== leaderKey) {
+        const followerIndex = followers.findIndex((candidate, candidateIndex) => getNodeKey(candidate, candidateIndex) === key);
+        const row = Math.floor(Math.max(0, followerIndex) / followerCols);
+        const col = Math.max(0, followerIndex) % followerCols;
+        x = startX + col * followerSpacingX;
+        y = startY + row * followerSpacingY;
       }
 
       flowNodes.push({
-        id: node.health?.nodeId ?? `node-${index}`,
+        id: key,
         type: "clusterNode",
         position: { x, y },
-        data: { node, leaderId: leaderNode?.health?.nodeId, selected: node.health?.nodeId === selectedNode?.health?.nodeId },
+        data: {
+          node,
+          displayName: getNodeLabel(node, index),
+          leaderId: leaderKey,
+          selected: key === selectedNodeKey,
+        },
       });
     });
 
-    const leaderId = leaderNode?.health?.nodeId;
+    const leaderId = leaderKey;
 
     if (leaderId) {
       followers.forEach((node) => {
-        if (!node.health?.nodeId) {
-          return;
-        }
+        const followerKey = getNodeKey(node, nodes.indexOf(node));
 
         flowEdges.push({
-          id: `edge-${leaderId}-${node.health.nodeId}`,
+          id: `edge-${leaderId}-${followerKey}`,
           source: leaderId,
-          target: node.health.nodeId,
+          target: followerKey,
           animated: true,
           type: "smoothstep",
           markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: "#34d399" },
@@ -529,7 +578,7 @@ export function DashboardApp() {
     }
 
     return { flowNodes, flowEdges };
-  }, [cluster, selectedNode]);
+  }, [cluster, selectedNodeKey]);
 
   const chartData = useMemo(() => {
     return history.map((snapshot, index) => {
@@ -594,16 +643,18 @@ export function DashboardApp() {
 
   const activeFaults = useMemo(() => {
     const faults: Array<{ id: string; label: string; detail: string }> = [];
-    cluster?.nodes.forEach((node) => {
+    cluster?.nodes.forEach((node, index) => {
       const chaos = node.chaos;
       if (!chaos) {
         return;
       }
 
+      const nodeLabel = getNodeLabel(node, index);
+
       if (chaos.enabled) {
         faults.push({
           id: `${node.health?.nodeId ?? node.baseUrl}-enabled`,
-          label: `Chaos enabled on ${node.health?.nodeId ?? node.baseUrl}`,
+          label: `Chaos enabled on ${nodeLabel}`,
           detail: "The fault injector is active.",
         });
       }
@@ -611,7 +662,7 @@ export function DashboardApp() {
       if (chaos.packetDropProbability > 0) {
         faults.push({
           id: `${node.health?.nodeId ?? node.baseUrl}-drop`,
-          label: `${node.health?.nodeId ?? node.baseUrl}: packet loss`,
+          label: `${nodeLabel}: packet loss`,
           detail: formatPercent(chaos.packetDropProbability * 100),
         });
       }
@@ -619,7 +670,7 @@ export function DashboardApp() {
       if (chaos.maxDelayMs > 0 || chaos.minDelayMs > 0) {
         faults.push({
           id: `${node.health?.nodeId ?? node.baseUrl}-latency`,
-          label: `${node.health?.nodeId ?? node.baseUrl}: latency`,
+          label: `${nodeLabel}: latency`,
           detail: `${chaos.minDelayMs}-${chaos.maxDelayMs}ms`,
         });
       }
@@ -627,7 +678,7 @@ export function DashboardApp() {
       chaos.partitions.forEach((partition, index) => {
         faults.push({
           id: `${node.health?.nodeId ?? node.baseUrl}-partition-${index}`,
-          label: `${node.health?.nodeId ?? node.baseUrl}: partition ${index + 1}`,
+          label: `${nodeLabel}: partition ${index + 1}`,
           detail: partition.groups.map((group) => group.join(", ")).join(" | "),
         });
       });
@@ -708,46 +759,82 @@ export function DashboardApp() {
       <div className="pointer-events-none absolute right-[-8rem] top-[18rem] h-[24rem] w-[24rem] rounded-full bg-emerald-500/10 blur-3xl" />
 
       <div className="relative mx-auto flex min-h-screen max-w-[1800px] gap-6 px-4 py-4 lg:px-6">
-        <aside className="hidden w-[280px] shrink-0 lg:block">
-          <div className="glass sticky top-4 rounded-3xl border border-white/8 p-5 shadow-glow">
-            <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-400/15 text-emerald-300">
-                <Network className="h-5 w-5" />
-              </div>
-              <div>
-                <div className="text-sm font-semibold tracking-[0.08em] text-white">RaftLab</div>
-                <div className="text-xs uppercase tracking-[0.2em] text-slate-400">Distributed systems lab</div>
-              </div>
-            </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="fixed left-4 top-4 z-50 rounded-full border-white/10 bg-slate-950/90 px-4 shadow-glow backdrop-blur-xl lg:left-6 lg:top-6"
+          onClick={() => setIsSidebarOpen((current) => !current)}
+          aria-expanded={isSidebarOpen}
+          aria-controls="dashboard-sidebar"
+        >
+          {isSidebarOpen ? <X className="h-4 w-4" /> : <PanelLeft className="h-4 w-4" />}
+          {isSidebarOpen ? "Close" : "Menu"}
+        </Button>
 
-            <div className="mt-6 space-y-2">
-              {SECTION_IDS.map((section) => (
-                <a
-                  key={section}
-                  href={`#${section}`}
-                  className="flex items-center justify-between rounded-2xl border border-white/5 bg-white/[0.02] px-4 py-3 text-sm text-slate-300 transition hover:border-emerald-400/30 hover:bg-white/[0.05] hover:text-white"
-                >
-                  <span>{section.charAt(0).toUpperCase() + section.slice(1)}</span>
-                  <ArrowUpRight className="h-4 w-4" />
-                </a>
-              ))}
-            </div>
+        <AnimatePresence>
+          {isSidebarOpen ? (
+            <>
+              <motion.button
+                type="button"
+                className="fixed inset-0 z-40 cursor-default bg-slate-950/60 backdrop-blur-sm"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                aria-label="Close sidebar"
+                onClick={() => setIsSidebarOpen(false)}
+              />
+              <motion.aside
+                id="dashboard-sidebar"
+                className="fixed inset-y-0 left-0 z-50 w-[300px] max-w-[calc(100vw-2rem)] p-4"
+                initial={{ x: -340, opacity: 0 }}
+                animate={{ x: 0, opacity: 1 }}
+                exit={{ x: -340, opacity: 0 }}
+                transition={{ type: "spring", stiffness: 280, damping: 32 }}
+              >
+                <div className="glass flex h-full flex-col rounded-[2rem] border border-white/10 p-5 shadow-glow">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-400/15 text-emerald-300">
+                      <Network className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <div className="text-sm font-semibold tracking-[0.08em] text-white">RaftLab</div>
+                      <div className="text-xs uppercase tracking-[0.2em] text-slate-400">Distributed systems lab</div>
+                    </div>
+                  </div>
 
-            <div className="mt-6 rounded-2xl border border-white/8 bg-slate-950/70 p-4">
-              <div className="flex items-center justify-between text-xs uppercase tracking-[0.18em] text-slate-500">
-                <span>Connection</span>
-                <span>{mode}</span>
-              </div>
-              <div className="mt-3 flex items-center gap-2 text-sm text-slate-200">
-                {mode === "websocket" ? <Sparkles className="h-4 w-4 text-emerald-300" /> : <RefreshCw className="h-4 w-4 text-sky-300" />}
-                <span>{mode === "websocket" ? "WebSocket live" : "Polling every 2s"}</span>
-              </div>
-              <div className="mt-2 text-xs text-slate-500">
-                {lastUpdatedAt ? `Last update ${formatShortDate(lastUpdatedAt)}` : "Waiting for the first cluster snapshot"}
-              </div>
-            </div>
-          </div>
-        </aside>
+                  <div className="mt-6 space-y-2">
+                    {SECTION_IDS.map((section) => (
+                      <a
+                        key={section}
+                        href={`#${section}`}
+                        onClick={() => setIsSidebarOpen(false)}
+                        className="flex items-center justify-between rounded-2xl border border-white/5 bg-white/[0.02] px-4 py-3 text-sm text-slate-300 transition hover:border-emerald-400/30 hover:bg-white/[0.05] hover:text-white"
+                      >
+                        <span>{section.charAt(0).toUpperCase() + section.slice(1)}</span>
+                        <ArrowUpRight className="h-4 w-4" />
+                      </a>
+                    ))}
+                  </div>
+
+                  <div className="mt-6 rounded-2xl border border-white/8 bg-slate-950/70 p-4">
+                    <div className="flex items-center justify-between text-xs uppercase tracking-[0.18em] text-slate-500">
+                      <span>Connection</span>
+                      <span>{mode}</span>
+                    </div>
+                    <div className="mt-3 flex items-center gap-2 text-sm text-slate-200">
+                      {mode === "websocket" ? <Sparkles className="h-4 w-4 text-emerald-300" /> : <RefreshCw className="h-4 w-4 text-sky-300" />}
+                      <span>{mode === "websocket" ? "WebSocket live" : "Polling every 2s"}</span>
+                    </div>
+                    <div className="mt-2 text-xs text-slate-500">
+                      {lastUpdatedAt ? `Last update ${formatShortDate(lastUpdatedAt)}` : "Waiting for the first cluster snapshot"}
+                    </div>
+                  </div>
+                </div>
+              </motion.aside>
+            </>
+          ) : null}
+        </AnimatePresence>
 
         <main className="min-w-0 flex-1 space-y-6">
           <header id="overview" className="glass rounded-[2rem] border border-white/8 p-6 shadow-glow">
@@ -843,15 +930,21 @@ export function DashboardApp() {
             id="topology"
             title="Live Cluster Topology"
             description="A React Flow view of the cluster with role-aware colors and replication links."
-            action={<Badge>Real-time</Badge>}
+            action={
+              <div className="flex items-center gap-2">
+                <Badge>Real-time</Badge>
+                <Badge>{cluster?.nodes.length ?? 0} nodes</Badge>
+              </div>
+            }
           >
-            <div className="h-[560px] overflow-hidden rounded-[1.75rem] border border-white/8 bg-slate-950/80">
+            <div className="h-[620px] overflow-hidden rounded-[1.75rem] border border-white/8 bg-slate-950/80">
               {cluster ? (
                 <ReactFlow
                   nodes={flow.flowNodes}
                   edges={flow.flowEdges}
                   nodeTypes={{ clusterNode: ClusterNodeView }}
                   fitView
+                  fitViewOptions={{ padding: 0.22, minZoom: 0.55, maxZoom: 1.2 }}
                   proOptions={{ hideAttribution: true }}
                   nodesDraggable={false}
                   nodesConnectable={false}
@@ -880,9 +973,9 @@ export function DashboardApp() {
             action={
               <div className="flex items-center gap-2">
                 <Select value={selectedNodeId} onChange={(event) => setSelectedNodeId(event.target.value)} className="w-[220px]">
-                  {cluster?.nodes.map((node) => (
-                    <option key={node.health?.nodeId ?? node.baseUrl} value={node.health?.nodeId ?? ""}>
-                      {node.health?.nodeId ?? node.baseUrl}
+                  {cluster?.nodes.map((node, index) => (
+                    <option key={getNodeKey(node, index)} value={getNodeKey(node, index)}>
+                      {getNodeLabel(node, index)}
                     </option>
                   ))}
                 </Select>
@@ -1357,9 +1450,9 @@ export function DashboardApp() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {cluster?.nodes.map((node) => (
-                  <TableRow key={node.health?.nodeId ?? node.baseUrl}>
-                    <TableCell className="font-medium text-white">{node.health?.nodeId ?? node.baseUrl}</TableCell>
+                {cluster?.nodes.map((node, index) => (
+                  <TableRow key={getNodeKey(node, index)}>
+                    <TableCell className="font-medium text-white">{getNodeLabel(node, index)}</TableCell>
                     <TableCell>
                       <Badge className={cn("border-white/10", healthTone(node.healthy))}>
                         {node.healthy ? "Healthy" : "Offline"}

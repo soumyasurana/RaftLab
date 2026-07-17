@@ -31,7 +31,7 @@ RaftLab now includes a production-style Next.js dashboard that turns the cluster
 
 ### Demo
 
-https://github.com/user-attachments/assets/4630a355-8c23-46b4-9cc0-69732771f738
+![RaftLab dashboard demo](assets/demo.gif)
 
 ---
 

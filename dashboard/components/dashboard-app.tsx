@@ -1178,7 +1178,7 @@ export function DashboardApp() {
             description="Newest events first, synthesized from live cluster changes."
             action={<Badge>{events.length} events</Badge>}
           >
-            <div className="space-y-3">
+            <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
               <AnimatePresence initial={false}>
                 {(events.length > 0
                   ? events

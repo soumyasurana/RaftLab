@@ -176,3 +176,45 @@ func TestDetectCorruption(t *testing.T) {
 		t.Fatal("expected corruption error")
 	}
 }
+
+func TestTruncateBeforeAndReadIndexed(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "wal.log")
+
+	wal, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer wal.Close()
+
+	for i := uint64(1); i <= 10; i++ {
+		if err := wal.Append(types.LogEntry{
+			Index:   types.LogIndex(i),
+			Term:    1,
+			Command: []byte("cmd"),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := wal.TruncateBefore(5); err != nil {
+		t.Fatal(err)
+	}
+
+	// Index 5 and below should not be present
+	if _, ok, _ := wal.EntryAt(5); ok {
+		t.Fatalf("expected entry 5 to be truncated")
+	}
+
+	// Index 6 should be present
+	entry, ok, err := wal.EntryAt(6)
+	if err != nil || !ok || uint64(entry.Index) != 6 {
+		t.Fatalf("expected entry 6, got ok=%v entry=%+v err=%v", ok, entry, err)
+	}
+
+	// EntriesFrom(6) should return 5 entries (6..10)
+	entries, err := wal.EntriesFrom(6)
+	if err != nil || len(entries) != 5 {
+		t.Fatalf("expected 5 entries from index 6, got %d (err: %v)", len(entries), err)
+	}
+}

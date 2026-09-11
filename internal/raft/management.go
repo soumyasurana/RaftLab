@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/soumyasurana/RaftLab/internal/api"
-	"github.com/soumyasurana/RaftLab/internal/chaos"
 	"github.com/soumyasurana/RaftLab/internal/snapshot"
 	"github.com/soumyasurana/RaftLab/pkg/types"
 )
@@ -341,21 +340,7 @@ func (n *Node) SetChaosPartition(ctx context.Context, groups [][]string) error {
 		return fmt.Errorf("chaos controller is not configured")
 	}
 
-	partitions := make([]chaos.Partition, 0, len(groups))
-	for _, group := range groups {
-		nodes := make([]types.NodeID, 0, len(group))
-		for _, nodeID := range group {
-			if nodeID == "" {
-				continue
-			}
-			nodes = append(nodes, types.NodeID(nodeID))
-		}
-		if len(nodes) > 0 {
-			partitions = append(partitions, chaos.Partition{Groups: [][]types.NodeID{nodes}})
-		}
-	}
-
-	n.chaosController.SetPartitions(partitions...)
+	n.chaosController.SetPartitionsFromStrings(groups)
 	return nil
 }
 

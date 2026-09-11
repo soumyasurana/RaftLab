@@ -150,40 +150,74 @@ func (w *WAL) LastEntry() (types.LogEntry, bool, error) {
 
 // EntryAt returns the entry at the given Raft index.
 func (w *WAL) EntryAt(index uint64) (types.LogEntry, bool, error) {
-
 	entries, err := w.ReadAll()
 	if err != nil {
 		return types.LogEntry{}, false, err
 	}
 
-	if index == 0 {
+	if index == 0 || len(entries) == 0 {
 		return types.LogEntry{}, false, nil
 	}
 
-	if int(index) > len(entries) {
+	firstIndex := uint64(entries[0].Index)
+	lastIndex := uint64(entries[len(entries)-1].Index)
+
+	if index < firstIndex || index > lastIndex {
 		return types.LogEntry{}, false, nil
 	}
 
-	return entries[index-1], true, nil
+	offset := index - firstIndex
+	if offset < uint64(len(entries)) && uint64(entries[offset].Index) == index {
+		return entries[offset], true, nil
+	}
+
+	for _, entry := range entries {
+		if uint64(entry.Index) == index {
+			return entry, true, nil
+		}
+	}
+
+	return types.LogEntry{}, false, nil
 }
 
 // EntriesFrom returns every entry starting from index.
 func (w *WAL) EntriesFrom(index uint64) ([]types.LogEntry, error) {
-
 	entries, err := w.ReadAll()
 	if err != nil {
 		return nil, err
+	}
+
+	if len(entries) == 0 {
+		return []types.LogEntry{}, nil
 	}
 
 	if index == 0 {
 		return entries, nil
 	}
 
-	if int(index) > len(entries) {
+	firstIndex := uint64(entries[0].Index)
+	lastIndex := uint64(entries[len(entries)-1].Index)
+
+	if index < firstIndex {
+		return entries, nil
+	}
+
+	if index > lastIndex {
 		return []types.LogEntry{}, nil
 	}
 
-	return entries[index-1:], nil
+	offset := index - firstIndex
+	if offset < uint64(len(entries)) && uint64(entries[offset].Index) == index {
+		return entries[offset:], nil
+	}
+
+	for i, entry := range entries {
+		if uint64(entry.Index) >= index {
+			return entries[i:], nil
+		}
+	}
+
+	return []types.LogEntry{}, nil
 }
 
 // TruncateAfter removes all entries after the given index.

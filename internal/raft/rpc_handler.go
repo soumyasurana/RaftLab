@@ -101,36 +101,30 @@ func (n *Node) HandleAppendEntries(
 
 	// Verify PrevLogIndex exists.
 	if req.PrevLogIndex > 0 {
-
-		entry, ok, err := n.wal.EntryAt(req.PrevLogIndex)
-		if err != nil {
-			n.mu.Unlock()
-			return nil, err
-		}
-
-		if !ok {
-
-			response := &pb.AppendEntriesResponse{
-				Term:    n.persistent.CurrentTerm,
-				Success: false,
+		if req.PrevLogIndex == n.volatile.LastIncludedIndex {
+			if req.PrevLogTerm != n.volatile.LastIncludedTerm {
+				response := &pb.AppendEntriesResponse{
+					Term:    n.persistent.CurrentTerm,
+					Success: false,
+				}
+				n.mu.Unlock()
+				return response, nil
+			}
+		} else {
+			entry, ok, err := n.wal.EntryAt(req.PrevLogIndex)
+			if err != nil {
+				n.mu.Unlock()
+				return nil, err
 			}
 
-			n.mu.Unlock()
-
-			return response, nil
-		}
-
-		// Verify PrevLogTerm.
-		if uint64(entry.Term) != req.PrevLogTerm {
-
-			response := &pb.AppendEntriesResponse{
-				Term:    n.persistent.CurrentTerm,
-				Success: false,
+			if !ok || uint64(entry.Term) != req.PrevLogTerm {
+				response := &pb.AppendEntriesResponse{
+					Term:    n.persistent.CurrentTerm,
+					Success: false,
+				}
+				n.mu.Unlock()
+				return response, nil
 			}
-
-			n.mu.Unlock()
-
-			return response, nil
 		}
 	}
 	if len(req.Entries) > 0 {
@@ -212,7 +206,7 @@ func (n *Node) lastLogInfoLocked() (
 	}
 
 	if !ok {
-		return 0, 0, nil
+		return n.volatile.LastIncludedIndex, n.volatile.LastIncludedTerm, nil
 	}
 
 	return uint64(entry.Index),

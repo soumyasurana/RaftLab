@@ -42,14 +42,16 @@ type Server struct {
 	grpcServer *grpc.Server
 }
 
-// NewServer creates a Raft gRPC server.
+// NewServer creates a Raft gRPC server with logging/recovery interceptor.
 func NewServer(address string, handler RaftHandler) *Server {
 	server := &Server{
 		address: address,
 		handler: handler,
 	}
 
-	server.grpcServer = grpc.NewServer()
+	server.grpcServer = grpc.NewServer(
+		grpc.UnaryInterceptor(UnaryServerLoggingInterceptor()),
+	)
 	pb.RegisterRaftServiceServer(server.grpcServer, server)
 
 	return server

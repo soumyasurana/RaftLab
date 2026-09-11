@@ -6,12 +6,13 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN go build -o /app/node ./cmd/node
+RUN CGO_ENABLED=0 go build -o /app/node ./cmd/node
+RUN CGO_ENABLED=0 go build -o /app/controller ./cmd/controller
 
 FROM alpine:latest
 WORKDIR /app
+RUN mkdir -p /app/data
 COPY --from=builder /app/node .
-
-# TODO: create data directory if needed
+COPY --from=builder /app/controller .
 
 CMD ["./node"]

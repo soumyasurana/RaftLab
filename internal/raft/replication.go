@@ -38,15 +38,19 @@ func (n *Node) replicateToPeer(peerID string) {
 	)
 
 	if nextIndex > 1 {
+		if nextIndex-1 == n.volatile.LastIncludedIndex {
+			prevIndex = n.volatile.LastIncludedIndex
+			prevTerm = n.volatile.LastIncludedTerm
+		} else {
+			entry, ok, err := n.wal.EntryAt(nextIndex - 1)
+			if err != nil {
+				return
+			}
 
-		entry, ok, err := n.wal.EntryAt(nextIndex - 1)
-		if err != nil {
-			return
-		}
-
-		if ok {
-			prevIndex = uint64(entry.Index)
-			prevTerm = uint64(entry.Term)
+			if ok {
+				prevIndex = uint64(entry.Index)
+				prevTerm = uint64(entry.Term)
+			}
 		}
 	}
 

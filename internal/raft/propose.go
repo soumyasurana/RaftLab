@@ -34,7 +34,7 @@ func (n *Node) Propose(cmd statemachine.Command) error {
 		return err
 	}
 
-	nextIndex := uint64(1)
+	nextIndex := n.volatile.LastIncludedIndex + 1
 
 	if ok {
 		nextIndex = uint64(lastEntry.Index) + 1

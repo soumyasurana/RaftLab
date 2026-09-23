@@ -34,5 +34,6 @@ type Node struct {
 
 	stateMachine *statemachine.KVStore
 
-	stopCh chan struct{}
+	stopCh   chan struct{}
+	stopOnce sync.Once
 }

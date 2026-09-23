@@ -138,22 +138,19 @@ func (n *Node) HandleAppendEntries(
 	}
 
 	if req.LeaderCommit > n.volatile.CommitIndex {
-		lastEntry, ok, err := n.wal.LastEntry()
+		lastIndex, _, err := n.lastLogInfoLocked()
 		if err != nil {
 			n.mu.Unlock()
 			return nil, err
 		}
-		if ok {
-			lastIndex := uint64(lastEntry.Index)
-			if req.LeaderCommit < lastIndex {
-				n.volatile.CommitIndex = req.LeaderCommit
-			} else {
-				n.volatile.CommitIndex = lastIndex
-			}
-			if err := n.applyCommittedEntries(); err != nil {
-				n.mu.Unlock()
-				return nil, err
-			}
+		if req.LeaderCommit < lastIndex {
+			n.volatile.CommitIndex = req.LeaderCommit
+		} else {
+			n.volatile.CommitIndex = lastIndex
+		}
+		if err := n.applyCommittedEntries(); err != nil {
+			n.mu.Unlock()
+			return nil, err
 		}
 	}
 

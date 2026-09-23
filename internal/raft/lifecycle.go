@@ -140,15 +140,22 @@ func (n *Node) Start() {
 }
 
 func (n *Node) Stop() error {
-	n.electionTimer.stop()
+	var walErr, rpcErr error
 
-	close(n.stopCh)
+	n.stopOnce.Do(func() {
+		n.electionTimer.stop()
 
-	var rpcErr error
-	if n.rpcClient != nil {
-		rpcErr = n.rpcClient.Close()
-	}
-	walErr := n.wal.Close()
+		if n.heartbeat != nil {
+			n.heartbeat.stop()
+		}
+
+		close(n.stopCh)
+
+		if n.rpcClient != nil {
+			rpcErr = n.rpcClient.Close()
+		}
+		walErr = n.wal.Close()
+	})
 
 	if rpcErr != nil {
 		return rpcErr

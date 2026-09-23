@@ -105,3 +105,54 @@ func TestProposeRejectsFollower(t *testing.T) {
 		t.Fatalf("expected ErrNotLeader, got %v", err)
 	}
 }
+
+func TestSingleNodeProposeCommitsAndApplies(t *testing.T) {
+	cfg := &config.Config{
+		Node: types.NodeConfig{
+			ID:      "node1",
+			Address: "localhost:50051",
+			DataDir: t.TempDir(),
+		},
+	}
+
+	node, err := New(cfg)
+	if err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+	defer node.Stop()
+
+	node.mu.Lock()
+	node.role = Leader
+	node.persistent.CurrentTerm = 1
+	node.initializeLeaderState(0)
+	node.mu.Unlock()
+
+	cmd := statemachine.Command{
+		Operation: statemachine.OpSet,
+		Key:       "greeting",
+		Value:     "hello world",
+	}
+
+	if err := node.Propose(cmd); err != nil {
+		t.Fatalf("propose command: %v", err)
+	}
+
+	node.mu.RLock()
+	commitIndex := node.volatile.CommitIndex
+	lastApplied := node.volatile.LastApplied
+	node.mu.RUnlock()
+
+	if commitIndex != 1 {
+		t.Fatalf("expected CommitIndex 1, got %d", commitIndex)
+	}
+
+	if lastApplied != 1 {
+		t.Fatalf("expected LastApplied 1, got %d", lastApplied)
+	}
+
+	val, ok := node.stateMachine.Get("greeting")
+	if !ok || val != "hello world" {
+		t.Fatalf("expected state machine to have greeting='hello world', got val=%q, ok=%v", val, ok)
+	}
+}
+

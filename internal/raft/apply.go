@@ -7,6 +7,10 @@ import "github.com/soumyasurana/RaftLab/internal/statemachine"
 // The caller must hold n.mu.
 func (n *Node) applyCommittedEntries() error {
 
+	if n.volatile.LastApplied < n.volatile.LastIncludedIndex {
+		n.volatile.LastApplied = n.volatile.LastIncludedIndex
+	}
+
 	for n.volatile.LastApplied < n.volatile.CommitIndex {
 
 		nextIndex := n.volatile.LastApplied + 1

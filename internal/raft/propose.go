@@ -51,6 +51,8 @@ func (n *Node) Propose(cmd statemachine.Command) error {
 		return err
 	}
 
+	n.advanceCommitIndex()
+
 	n.mu.Unlock()
 
 	for _, peer := range n.config.Node.Peers {

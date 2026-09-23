@@ -72,15 +72,45 @@ func TestNodeRestartRecoversMetadata(t *testing.T) {
 	}
 
 	node2.mu.RLock()
-	defer node2.mu.RUnlock()
+	term := node2.persistent.CurrentTerm
+	votedFor := node2.persistent.VotedFor
+	node2.mu.RUnlock()
 
-	if node2.persistent.CurrentTerm != 42 {
-		t.Fatalf("Expected CurrentTerm 42, got %d", node2.persistent.CurrentTerm)
+	if term != 42 {
+		t.Fatalf("Expected CurrentTerm 42, got %d", term)
 	}
 
-	if node2.persistent.VotedFor != "node2" {
-		t.Fatalf("Expected VotedFor node2, got %s", node2.persistent.VotedFor)
+	if votedFor != "node2" {
+		t.Fatalf("Expected VotedFor node2, got %s", votedFor)
 	}
 
 	_ = node2.Stop()
 }
+
+func TestNodeStopIdempotent(t *testing.T) {
+	dir := t.TempDir()
+
+	cfg := &config.Config{
+		Node: types.NodeConfig{
+			ID:      "node1",
+			Address: "localhost:50051",
+			DataDir: dir,
+		},
+	}
+
+	node, err := New(cfg)
+	if err != nil {
+		t.Fatalf("Failed to create node: %v", err)
+	}
+
+	// First stop
+	if err := node.Stop(); err != nil {
+		t.Fatalf("first Stop returned error: %v", err)
+	}
+
+	// Second stop should not panic or fail
+	if err := node.Stop(); err != nil {
+		t.Fatalf("second Stop returned error: %v", err)
+	}
+}
+

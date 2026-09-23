@@ -139,7 +139,7 @@ func (n *Node) handleElectionTimeout() {
 
 			votesMu.Lock()
 			votes++
-			wonElection := votes >= quorum
+			wonElection := votes == quorum
 			votesMu.Unlock()
 
 			if wonElection {

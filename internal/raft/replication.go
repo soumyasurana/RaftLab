@@ -20,8 +20,10 @@ func (n *Node) replicateToPeer(peerID string) {
 	}
 
 	nextIndex := n.volatile.NextIndex[types.NodeID(peerID)]
+	lastIncludedIndex := n.volatile.LastIncludedIndex
+	lastIncludedTerm := n.volatile.LastIncludedTerm
 
-	if nextIndex <= n.volatile.LastIncludedIndex {
+	if nextIndex <= lastIncludedIndex {
 		n.mu.RUnlock()
 		n.sendInstallSnapshot(peerID)
 		return
@@ -38,9 +40,9 @@ func (n *Node) replicateToPeer(peerID string) {
 	)
 
 	if nextIndex > 1 {
-		if nextIndex-1 == n.volatile.LastIncludedIndex {
-			prevIndex = n.volatile.LastIncludedIndex
-			prevTerm = n.volatile.LastIncludedTerm
+		if nextIndex-1 == lastIncludedIndex {
+			prevIndex = lastIncludedIndex
+			prevTerm = lastIncludedTerm
 		} else {
 			entry, ok, err := n.wal.EntryAt(nextIndex - 1)
 			if err != nil {
@@ -103,6 +105,7 @@ func (n *Node) replicateToPeer(peerID string) {
 	n.handleAppendEntriesResponse(
 		peerID,
 		response,
+		prevIndex,
 		len(entries),
 	)
 }
@@ -111,6 +114,7 @@ func (n *Node) replicateToPeer(peerID string) {
 func (n *Node) handleAppendEntriesResponse(
 	peerID string,
 	response *pb.AppendEntriesResponse,
+	prevIndex uint64,
 	replicated int,
 ) {
 	n.mu.Lock()
@@ -128,13 +132,15 @@ func (n *Node) handleAppendEntriesResponse(
 	nodeID := types.NodeID(peerID)
 
 	if response.Success {
-
-		n.volatile.NextIndex[nodeID] += uint64(replicated)
+		matchIndex := prevIndex + uint64(replicated)
+		if matchIndex > n.volatile.MatchIndex[nodeID] {
+			n.volatile.MatchIndex[nodeID] = matchIndex
+		}
+		if matchIndex+1 > n.volatile.NextIndex[nodeID] {
+			n.volatile.NextIndex[nodeID] = matchIndex + 1
+		}
 
 		if replicated > 0 {
-			n.volatile.MatchIndex[nodeID] =
-				n.volatile.NextIndex[nodeID] - 1
-
 			// Check whether a quorum has replicated a new entry.
 			n.advanceCommitIndex()
 		}

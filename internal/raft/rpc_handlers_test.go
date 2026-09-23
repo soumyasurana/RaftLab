@@ -272,3 +272,42 @@ func TestAppendEntriesUpdatesTermAndBecomesFollower(
 		)
 	}
 }
+
+func TestAppendEntriesAdvancesCommitWhenWALEmptyAfterCompaction(t *testing.T) {
+	node := newTestNode(t)
+
+	node.mu.Lock()
+	node.persistent.CurrentTerm = 2
+	node.volatile.LastIncludedIndex = 5
+	node.volatile.LastIncludedTerm = 2
+	node.volatile.CommitIndex = 4
+	node.volatile.LastApplied = 4
+	node.mu.Unlock()
+
+	// Leader sends heartbeat with LeaderCommit = 5, PrevLogIndex = 5, PrevLogTerm = 2
+	response, err := node.HandleAppendEntries(
+		context.Background(),
+		&pb.AppendEntriesRequest{
+			Term:         2,
+			LeaderId:     "node-2",
+			PrevLogIndex: 5,
+			PrevLogTerm:  2,
+			LeaderCommit: 5,
+		},
+	)
+	if err != nil {
+		t.Fatalf("handle AppendEntries: %v", err)
+	}
+
+	if !response.Success {
+		t.Fatal("expected AppendEntries to succeed")
+	}
+
+	node.mu.RLock()
+	commitIndex := node.volatile.CommitIndex
+	node.mu.RUnlock()
+
+	if commitIndex != 5 {
+		t.Fatalf("expected CommitIndex 5, got %d", commitIndex)
+	}
+}

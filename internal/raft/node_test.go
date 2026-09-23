@@ -113,4 +113,3 @@ func TestNodeStopIdempotent(t *testing.T) {
 		t.Fatalf("second Stop returned error: %v", err)
 	}
 }
-

@@ -155,4 +155,3 @@ func TestSingleNodeProposeCommitsAndApplies(t *testing.T) {
 		t.Fatalf("expected state machine to have greeting='hello world', got val=%q, ok=%v", val, ok)
 	}
 }
-

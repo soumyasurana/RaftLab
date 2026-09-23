@@ -140,4 +140,3 @@ func TestHandleAppendEntriesResponseMonotonicUpdates(t *testing.T) {
 		t.Fatalf("expected match=5, next=6 to remain monotonic, got match=%d, next=%d", match, next)
 	}
 }
-

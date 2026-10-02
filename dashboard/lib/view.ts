@@ -96,14 +96,16 @@ export function deriveTimelineEvents(
     const nodeId = node.health?.nodeId ?? "unknown";
 
     if (prevNode?.healthy && !node.healthy) {
+      const offlineRole = prevNode.health?.role ?? prevNode.status?.role;
+      const offlineTitle = offlineRole === "Leader" ? "Leader offline" : "Node offline";
       events.push(
-        newestEvent("node-offline", "Leader crashed", `Node ${nodeId} became unreachable.`, "critical", nodeId),
+        newestEvent("node-offline", offlineTitle, `Node ${nodeId} became unreachable.`, "critical", nodeId),
       );
     }
 
     if (!prevNode?.healthy && node.healthy) {
       events.push(
-        newestEvent("node-recovered", "Node restarted", `Node ${nodeId} rejoined the cluster.`, "success", nodeId),
+        newestEvent("node-recovered", "Node recovered", `Node ${nodeId} rejoined the cluster.`, "success", nodeId),
       );
     }
 

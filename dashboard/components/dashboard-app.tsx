@@ -97,6 +97,18 @@ const SECTION_IDS = [
   "health",
 ];
 
+const SECTION_LABELS: Record<string, string> = {
+  overview: "Overview",
+  topology: "Live Topology",
+  node: "Node Details",
+  state: "Replicated State",
+  metrics: "Metrics Dashboard",
+  events: "Event Timeline",
+  chaos: "Chaos Control",
+  snapshot: "Snapshot Management",
+  health: "Cluster Health",
+};
+
 function getNodeKey(node: NodeSnapshot, index: number) {
   return node.health?.nodeId ?? node.baseUrl ?? `node-${index + 1}`;
 }
@@ -494,6 +506,10 @@ export function DashboardApp() {
   }, [cluster, selectedNodeId, targetNodeId]);
 
   useEffect(() => {
+    if (!notice) {
+      return;
+    }
+
     const timer = setTimeout(() => setNotice(null), 4200);
     return () => clearTimeout(timer);
   }, [notice]);
@@ -601,7 +617,7 @@ export function DashboardApp() {
 
       const heartbeatsPerSec = Math.max(
         0,
-        ((currentMetrics?.appendEntriesSent ?? 0) - (previousMetrics?.appendEntriesSent ?? 0)) / elapsedSeconds,
+        ((currentMetrics?.appendEntriesReceived ?? 0) - (previousMetrics?.appendEntriesReceived ?? 0)) / elapsedSeconds,
       );
 
       const appendEntriesPerSec = Math.max(
@@ -810,7 +826,7 @@ export function DashboardApp() {
                         onClick={() => setIsSidebarOpen(false)}
                         className="flex items-center justify-between rounded-2xl border border-white/5 bg-white/[0.02] px-4 py-3 text-sm text-slate-300 transition hover:border-emerald-400/30 hover:bg-white/[0.05] hover:text-white"
                       >
-                        <span>{section.charAt(0).toUpperCase() + section.slice(1)}</span>
+                        <span>{SECTION_LABELS[section] ?? section.charAt(0).toUpperCase() + section.slice(1)}</span>
                         <ArrowUpRight className="h-4 w-4" />
                       </a>
                     ))}
@@ -819,7 +835,20 @@ export function DashboardApp() {
                   <div className="mt-6 rounded-2xl border border-white/8 bg-slate-950/70 p-4">
                     <div className="flex items-center justify-between text-xs uppercase tracking-[0.18em] text-slate-500">
                       <span>Connection</span>
-                      <span>{mode}</span>
+                      <span
+                        className={cn(
+                          "rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-widest",
+                          mode === "websocket"
+                            ? "bg-emerald-500/15 text-emerald-300"
+                            : mode === "polling"
+                              ? "bg-sky-500/15 text-sky-300"
+                              : mode === "offline"
+                                ? "bg-rose-500/15 text-rose-300"
+                                : "bg-white/5 text-slate-400",
+                        )}
+                      >
+                        {mode}
+                      </span>
                     </div>
                     <div className="mt-3 flex items-center gap-2 text-sm text-slate-200">
                       {mode === "websocket" ? <Sparkles className="h-4 w-4 text-emerald-300" /> : <RefreshCw className="h-4 w-4 text-sky-300" />}
@@ -1003,8 +1032,8 @@ export function DashboardApp() {
                     <CardContent className="grid gap-3">
                       <InfoRow label="Commit index" value={String(selectedNode.status?.commitIndex ?? 0)} />
                       <InfoRow label="Last applied" value={String(selectedNode.status?.lastApplied ?? 0)} />
-                      <InfoRow label="NextIndex" value={String((selectedNode.peers?.[0]?.nextIndex ?? 0))} />
-                      <InfoRow label="MatchIndex" value={String((selectedNode.peers?.[0]?.matchIndex ?? 0))} />
+                      <InfoRow label="WAL length" value={String(selectedNode.status?.logLength ?? 0)} />
+                      <InfoRow label="Leader changes" value={String(selectedNode.metrics?.leaderChanges ?? 0)} />
                     </CardContent>
                   </Card>
 
@@ -1049,14 +1078,22 @@ export function DashboardApp() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {(selectedNode.peers ?? []).map((peer) => (
-                          <TableRow key={peer.peerId}>
-                            <TableCell className="font-medium text-white">{peer.peerId}</TableCell>
-                            <TableCell>{peer.connectionState}</TableCell>
-                            <TableCell>{peer.nextIndex}</TableCell>
-                            <TableCell>{peer.matchIndex}</TableCell>
+                        {(selectedNode.peers ?? []).length > 0 ? (
+                          (selectedNode.peers ?? []).map((peer) => (
+                            <TableRow key={peer.peerId}>
+                              <TableCell className="font-medium text-white">{peer.peerId}</TableCell>
+                              <TableCell>{peer.connectionState}</TableCell>
+                              <TableCell>{peer.nextIndex}</TableCell>
+                              <TableCell>{peer.matchIndex}</TableCell>
+                            </TableRow>
+                          ))
+                        ) : (
+                          <TableRow>
+                            <TableCell colSpan={4} className="py-6 text-center text-sm text-slate-500">
+                              No peer data available
+                            </TableCell>
                           </TableRow>
-                        ))}
+                        )}
                       </TableBody>
                     </Table>
                   </CardContent>
@@ -1449,8 +1486,12 @@ export function DashboardApp() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {cluster?.nodes.map((node, index) => (
-                  <TableRow key={getNodeKey(node, index)}>
+              {cluster?.nodes.map((node, index) => (
+                  <TableRow
+                    key={getNodeKey(node, index)}
+                    className="cursor-pointer transition hover:bg-white/[0.03]"
+                    onClick={() => setSelectedNodeId(getNodeKey(node, index))}
+                  >
                     <TableCell className="font-medium text-white">{getNodeLabel(node, index)}</TableCell>
                     <TableCell>
                       <Badge className={cn("border-white/10", healthTone(node.healthy))}>
@@ -1483,8 +1524,16 @@ export function DashboardApp() {
             )}
           >
             <div className="flex items-start gap-3">
-              {notice.tone === "success" ? <CheckCircle2 className="mt-0.5 h-4 w-4" /> : <AlertTriangle className="mt-0.5 h-4 w-4" />}
+              {notice.tone === "success" ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> : <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />}
               <div className="text-sm">{notice.message}</div>
+              <button
+                type="button"
+                aria-label="Dismiss"
+                onClick={() => setNotice(null)}
+                className="ml-auto shrink-0 rounded-full p-0.5 opacity-60 transition hover:opacity-100"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
             </div>
           </motion.div>
         ) : null}

@@ -32,7 +32,6 @@ import {
   PlayCircle,
   RefreshCw,
   ShieldAlert,
-  Sparkles,
   Zap,
   X,
 } from "lucide-react";
@@ -72,7 +71,7 @@ import {
   replicationLag,
 } from "@/lib/view";
 
-type ConnectionMode = "loading" | "websocket" | "polling" | "offline";
+type ConnectionMode = "loading" | "polling" | "offline";
 type ViewMode = "json" | "table";
 type FaultMode = "latency" | "packetLoss" | "partition" | "failure";
 type FailureMode = "crashNode" | "restartNode" | "disconnectNode" | "reconnectNode";
@@ -273,13 +272,10 @@ function useClusterFeed() {
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<ConnectionMode>("loading");
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
     mountedRef.current = true;
-    const wsUrl = process.env.NEXT_PUBLIC_RAFTLAB_WS_URL;
-
     const applyCluster = (payload: ClusterResponse) => {
       if (!mountedRef.current) {
         return;
@@ -325,71 +321,10 @@ function useClusterFeed() {
       }, 2000);
     };
 
-    if (!wsUrl) {
-      startPolling();
-      return () => {
-        mountedRef.current = false;
-        stopPolling();
-      };
-    }
-
-    let fellBackToPolling = false;
-
-    const fallbackToPolling = () => {
-      if (fellBackToPolling) {
-        return;
-      }
-      fellBackToPolling = true;
-      wsRef.current = null;
-      startPolling();
-    };
-
-    try {
-      setMode("loading");
-      const socket = new WebSocket(wsUrl);
-      wsRef.current = socket;
-
-      socket.onopen = () => {
-        if (mountedRef.current) {
-          setMode("websocket");
-        }
-      };
-
-      socket.onmessage = (event) => {
-        try {
-          applyCluster(JSON.parse(event.data) as ClusterResponse);
-          setMode("websocket");
-        } catch {
-          setError("WebSocket payload could not be parsed.");
-        }
-      };
-
-      socket.onerror = () => {
-        if (!mountedRef.current) {
-          return;
-        }
-        socket.close();
-        fallbackToPolling();
-      };
-
-      socket.onclose = () => {
-        if (!mountedRef.current) {
-          return;
-        }
-        fallbackToPolling();
-      };
-    } catch {
-      startPolling();
-      return () => {
-        mountedRef.current = false;
-        stopPolling();
-      };
-    }
+    startPolling();
 
     return () => {
       mountedRef.current = false;
-      wsRef.current?.close();
-      wsRef.current = null;
       stopPolling();
     };
   }, []);
@@ -838,21 +773,19 @@ export function DashboardApp() {
                       <span
                         className={cn(
                           "rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-widest",
-                          mode === "websocket"
-                            ? "bg-emerald-500/15 text-emerald-300"
-                            : mode === "polling"
-                              ? "bg-sky-500/15 text-sky-300"
-                              : mode === "offline"
-                                ? "bg-rose-500/15 text-rose-300"
-                                : "bg-white/5 text-slate-400",
+                          mode === "polling"
+                            ? "bg-sky-500/15 text-sky-300"
+                            : mode === "offline"
+                              ? "bg-rose-500/15 text-rose-300"
+                              : "bg-white/5 text-slate-400",
                         )}
                       >
                         {mode}
                       </span>
                     </div>
                     <div className="mt-3 flex items-center gap-2 text-sm text-slate-200">
-                      {mode === "websocket" ? <Sparkles className="h-4 w-4 text-emerald-300" /> : <RefreshCw className="h-4 w-4 text-sky-300" />}
-                      <span>{mode === "websocket" ? "WebSocket live" : "Polling every 2s"}</span>
+                      <RefreshCw className="h-4 w-4 text-sky-300" />
+                      <span>{mode === "offline" ? "Waiting to reconnect" : "Polling every 2s"}</span>
                     </div>
                     <div className="mt-2 text-xs text-slate-500">
                       {lastUpdatedAt ? `Last update ${formatShortDate(lastUpdatedAt)}` : "Waiting for the first cluster snapshot"}
@@ -1278,7 +1211,7 @@ export function DashboardApp() {
                 <Card className="border-white/8 bg-white/[0.02]">
                   <CardHeader>
                     <CardTitle>Cluster-wide controls</CardTitle>
-                    <CardDescription>These operate on the selected management API target.</CardDescription>
+                    <CardDescription>Chaos settings are applied to every configured node to keep the simulated cluster consistent.</CardDescription>
                   </CardHeader>
                   <CardContent className="grid gap-3 sm:grid-cols-3">
                     <Button variant="default" onClick={() => void postAction("enableChaos", {}, chaosNode?.baseUrl)} disabled={isBusy}>

@@ -40,3 +40,4 @@ dashboard/node_modules/
 dashboard/.next/
 out/
 dashboard/out/
+gha-creds-*.json

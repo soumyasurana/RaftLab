@@ -1,0 +1,4 @@
+{$CADDY_DOMAIN} {
+  encode zstd gzip
+  reverse_proxy dashboard:3000
+}

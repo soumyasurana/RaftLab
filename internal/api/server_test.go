@@ -118,6 +118,35 @@ func (f *fakeManager) ReconnectNode(context.Context, string) error {
 	return f.chaosErr
 }
 
+func TestChaosControlValidation(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{"negative minimum latency", validateChaosLatency(ChaosLatencyRequest{MinDelayMs: -1})},
+		{"negative maximum latency", validateChaosLatency(ChaosLatencyRequest{MaxDelayMs: -1})},
+		{"inverted latency range", validateChaosLatency(ChaosLatencyRequest{MinDelayMs: 20, MaxDelayMs: 10})},
+		{"oversized latency", validateChaosLatency(ChaosLatencyRequest{MaxDelayMs: maxChaosDelayMilliseconds + 1})},
+		{"negative packet loss", validatePacketLoss(-0.1)},
+		{"packet loss above one", validatePacketLoss(1.1)},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if test.err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
+	}
+
+	if err := validateChaosLatency(ChaosLatencyRequest{MinDelayMs: 0, MaxDelayMs: 500}); err != nil {
+		t.Fatalf("expected valid latency range: %v", err)
+	}
+	if err := validatePacketLoss(0.5); err != nil {
+		t.Fatalf("expected valid packet loss: %v", err)
+	}
+}
+
 func TestServerEndpoints(t *testing.T) {
 	manager := &fakeManager{
 		health: HealthResponse{

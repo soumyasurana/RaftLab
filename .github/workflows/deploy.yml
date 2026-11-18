@@ -1,41 +1,107 @@
-name: Deploy to Azure
+name: Deploy to Compute Engine
 
 on:
   workflow_run:
     workflows: ["Go CI"]
-    types:
-      - completed
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+
+concurrency:
+  group: production-compose
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  GCP_REGION: ${{ vars.GCP_REGION }}
+  GAR_REPOSITORY: ${{ vars.GAR_REPOSITORY }}
+  GCE_INSTANCE: ${{ vars.GCE_INSTANCE }}
+  GCE_ZONE: ${{ vars.GCE_ZONE }}
+  GCE_DEPLOY_USER: ${{ vars.GCE_DEPLOY_USER }}
+  CADDY_DOMAIN: ${{ vars.CADDY_DOMAIN }}
 
 jobs:
   deploy:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
-    name: Deploy
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    name: Build and deploy
     runs-on: ubuntu-latest
-
+    environment: production
     steps:
-      - name: Deploy over SSH
-        uses: appleboy/ssh-action@v1.2.2
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          host: ${{ secrets.AZURE_HOST }}
-          username: ${{ secrets.AZURE_USER }}
-          key: ${{ secrets.AZURE_SSH_KEY }}
-          script: |
-            set -e
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
-            cd ~/RaftLab
+      - name: Validate deployment configuration
+        run: |
+          test -n "$GCP_PROJECT_ID"
+          test -n "$GCP_REGION"
+          test -n "$GAR_REPOSITORY"
+          test -n "$GCE_INSTANCE"
+          test -n "$GCE_ZONE"
+          test -n "$GCE_DEPLOY_USER"
+          test -n "$CADDY_DOMAIN"
+          test -n "${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}"
+          test -n "${{ vars.GCP_SERVICE_ACCOUNT }}"
 
-            echo "Updating repository..."
-            git fetch origin
-            git reset --hard origin/main
+      - id: auth
+        name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
 
-            echo "Building containers..."
-            cd deployments
-            docker compose build
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
 
-            echo "Restarting services..."
-            docker compose up -d --remove-orphans
+      - name: Configure Artifact Registry authentication
+        run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
 
-            echo "Cleaning unused Docker images..."
-            docker image prune -f
+      - name: Build and push images
+        env:
+          IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          RAFT_IMAGE="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GAR_REPOSITORY}/raftlab:${IMAGE_TAG}"
+          DASHBOARD_IMAGE="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GAR_REPOSITORY}/raftlab-dashboard:${IMAGE_TAG}"
+          docker build --file deployments/Dockerfile --tag "$RAFT_IMAGE" .
+          docker build --file dashboard/Dockerfile --tag "$DASHBOARD_IMAGE" .
+          docker push "$RAFT_IMAGE"
+          docker push "$DASHBOARD_IMAGE"
 
-            echo "Deployment completed successfully!"
+      - name: Stage and deploy Compose release through IAP
+        env:
+          IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          RAFT_IMAGE="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GAR_REPOSITORY}/raftlab:${IMAGE_TAG}"
+          DASHBOARD_IMAGE="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GAR_REPOSITORY}/raftlab-dashboard:${IMAGE_TAG}"
+          TARGET="${GCE_DEPLOY_USER}@${GCE_INSTANCE}"
+          RELEASE="/opt/raftlab/releases/${IMAGE_TAG}"
+          gcloud compute ssh "$TARGET" --zone "$GCE_ZONE" --tunnel-through-iap --command "sudo mkdir -p '$RELEASE'"
+          gcloud compute scp --recurse deployments/configs/docker "$TARGET:$RELEASE/configs" --zone "$GCE_ZONE" --tunnel-through-iap
+          gcloud compute scp deployments/docker-compose.production.yml deployments/Caddyfile "$TARGET:$RELEASE/" --zone "$GCE_ZONE" --tunnel-through-iap
+          RELEASE_ENV=$(printf 'RAFTLAB_IMAGE=%s\nDASHBOARD_IMAGE=%s\nIMAGE_TAG=%s\nCADDY_DOMAIN=%s\n' "$RAFT_IMAGE" "$DASHBOARD_IMAGE" "$IMAGE_TAG" "$CADDY_DOMAIN" | base64 -w0)
+          gcloud compute ssh "$TARGET" --zone "$GCE_ZONE" --tunnel-through-iap --command "sudo bash -s -- '$IMAGE_TAG' '$RELEASE_ENV'" <<'REMOTE'
+          set -euo pipefail
+          tag="$1"; env_b64="$2"; release="/opt/raftlab/releases/$tag"; current="/opt/raftlab/current"
+          printf '%s' "$env_b64" | base64 -d | sudo tee "$release/.env" >/dev/null
+          sudo docker compose --env-file "$release/.env" -f "$release/docker-compose.production.yml" pull
+          previous=$(readlink -f "$current" || true)
+          sudo ln -sfn "$release" "$current"
+          if ! sudo docker compose --env-file "$current/.env" -f "$current/docker-compose.production.yml" up -d --remove-orphans; then
+            test -z "$previous" || sudo ln -sfn "$previous" "$current"
+            exit 1
+          fi
+          for i in $(seq 1 24); do
+            ids=$(sudo docker compose --env-file "$current/.env" -f "$current/docker-compose.production.yml" ps -q node1 node2 node3 node4 node5 dashboard)
+            unhealthy=$(sudo docker inspect $ids --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' | grep -v '^healthy$' || true)
+            test -z "$unhealthy" && break
+            sleep 5
+          done
+          sudo docker compose --env-file "$current/.env" -f "$current/docker-compose.production.yml" ps
+          sudo docker compose --env-file "$current/.env" -f "$current/docker-compose.production.yml" exec -T dashboard node -e "fetch('http://localhost:3000/api/cluster').then(r=>process.exit(r.ok?0:1))"
+          REMOTE

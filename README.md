@@ -87,17 +87,9 @@ View the cluster logs:
 docker compose -f deployments/docker-compose.yml logs -f
 ```
 
-### Run on Kubernetes
+### Deploy on Google Cloud Compute Engine
 
-The Kubernetes deployment guide lives in [`deployments/kubernetes/README.md`](deployments/kubernetes/README.md).
-
-It covers:
-
-- StatefulSet-based deployment
-- Headless peer discovery
-- Persistent storage layout
-- Health checks and resource limits
-- `kubectl` commands for rollout, logs, exec, and port-forwarding
+The production Docker Compose deployment guide is in [`docs/docker-compose-cd.md`](docs/docker-compose-cd.md).
 
 ---
 
@@ -129,9 +121,9 @@ It covers:
 - ✅ Snapshots
 - ✅ Chaos controller
 - ✅ Fiber management API
-- ✅ WebSocket Event Stream
+- ✅ Dashboard polling feed
 - ✅ Next.js dashboard
-- ✅ Kubernetes Deployment (StatefulSet, PVCs, Services)
+- ✅ Compute Engine Docker Compose deployment
 
 ---
 
@@ -380,7 +372,7 @@ docs/
 | Consensus RPC      | gRPC                      |
 | Serialization      | Protocol Buffers          |
 | Management API     | Fiber                     |
-| Real-Time Updates  | WebSockets                |
+| Live Updates       | Two-second dashboard polling |
 | Logging            | Zerolog                   |
 | Configuration      | YAML                      |
 | Persistent Storage | Custom Write-Ahead Log    |
@@ -416,7 +408,7 @@ docs/
 - Dynamic membership
 - Cluster visualization
 - Benchmarking
-- Kubernetes deployment
+- Compute Engine Docker Compose deployment
 
 ### Stretch Goals
 - Snapshot installation via gRPC streaming

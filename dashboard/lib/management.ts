@@ -13,6 +13,13 @@ import {
 
 const DEFAULT_TIMEOUT_MS = 1800;
 
+export const dashboardActions = [
+  "enableChaos", "disableChaos", "resetChaos", "takeSnapshot", "setLatency",
+  "setPacketLoss", "setPartition", "crashNode", "restartNode", "disconnectNode", "reconnectNode",
+] as const;
+
+export type DashboardAction = (typeof dashboardActions)[number];
+
 function readNodeUrls() {
   const raw = process.env.RAFTLAB_NODE_URLS?.trim();
 
@@ -104,7 +111,9 @@ export async function fetchNodeSnapshot(baseUrl: string): Promise<NodeSnapshot> 
     tryFetchJson<ChaosStatusResponse>(`${baseUrl}/chaos`),
   ]);
 
-  const healthy = Boolean(health && status);
+  const chaosState = normalizeNodeState(chaos);
+  const simulatedCrash = Boolean(health && chaosState?.nodes[health.nodeId]?.crashed);
+  const healthy = Boolean(health && status) && !simulatedCrash;
   const latencyMs = Math.max(0, Math.round(performance.now() - started));
 
   return {
@@ -116,14 +125,14 @@ export async function fetchNodeSnapshot(baseUrl: string): Promise<NodeSnapshot> 
     peers,
     state,
     metrics,
-    chaos: normalizeNodeState(chaos),
-    error: healthy ? undefined : "management API unavailable",
+    chaos: chaosState,
+    error: healthy ? undefined : simulatedCrash ? "node is crashed by chaos control" : "management API unavailable",
   };
 }
 
 function summarize(nodes: NodeSnapshot[]): ClusterSummary {
   const healthyNodes = nodes.filter((node) => node.healthy && node.health && node.status);
-  const leader = healthyNodes.find((node) => node.health?.role === "Leader") ?? healthyNodes[0];
+  const leader = healthyNodes.find((node) => node.health?.role === "Leader");
   const followers = healthyNodes.filter((node) => node.health?.role === "Follower").length;
   const commitIndex = Math.max(...healthyNodes.map((node) => node.status?.commitIndex ?? 0), 0);
   const lastApplied = Math.max(...healthyNodes.map((node) => node.status?.lastApplied ?? 0), 0);
@@ -141,7 +150,9 @@ function summarize(nodes: NodeSnapshot[]): ClusterSummary {
     : 0;
 
   let status: ClusterSummary["status"] = "unstable";
-  if (healthyNodes.length === nodes.length && leader) {
+  if (!leader) {
+    status = "unstable";
+  } else if (healthyNodes.length === nodes.length) {
     status = "healthy";
   } else if (healthyNodes.length > 0) {
     status = "degraded";
@@ -174,18 +185,7 @@ export async function loadClusterState() {
 
 export async function issueNodeAction(
   baseUrl: string,
-  action:
-    | "enableChaos"
-    | "disableChaos"
-    | "resetChaos"
-    | "takeSnapshot"
-    | "setLatency"
-    | "setPacketLoss"
-    | "setPartition"
-    | "crashNode"
-    | "restartNode"
-    | "disconnectNode"
-    | "reconnectNode",
+  action: DashboardAction,
   payload: Record<string, unknown> = {},
 ) {
   switch (action) {
@@ -235,6 +235,37 @@ export async function issueNodeAction(
     default:
       throw new Error(`unsupported action: ${action}`);
   }
+}
+
+export function isDashboardAction(value: unknown): value is DashboardAction {
+  return typeof value === "string" && dashboardActions.includes(value as DashboardAction);
+}
+
+export function isClusterChaosAction(action: DashboardAction) {
+  return action !== "takeSnapshot";
+}
+
+// Every node owns its own transport-level chaos controller. Applying a control
+// action to every configured node keeps the simulated network view consistent.
+export async function issueClusterChaosAction(action: DashboardAction, payload: Record<string, unknown> = {}) {
+  const nodeUrls = getConfiguredNodeUrls();
+  if (nodeUrls.length === 0) {
+    throw new Error("No management API URLs configured.");
+  }
+
+  const results = await Promise.allSettled(
+    nodeUrls.map((nodeUrl) => issueNodeAction(nodeUrl, action, payload)),
+  );
+  const failures = results.filter((result) => result.status === "rejected");
+
+  if (failures.length > 0) {
+    return {
+      success: false,
+      message: `Applied on ${nodeUrls.length - failures.length}/${nodeUrls.length} nodes.`,
+    } satisfies ActionResponse;
+  }
+
+  return { success: true } satisfies ActionResponse;
 }
 
 export function getConfiguredNodeUrls() {

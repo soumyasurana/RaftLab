@@ -376,7 +376,7 @@ Potential additions include:
 * Authentication
 * Metrics and distributed tracing
 * Web dashboard
-* Kubernetes deployment
+* Compute Engine Docker Compose deployment
 * Multi-Raft support
 * Benchmarking and performance profiling
 

@@ -1,0 +1,85 @@
+x-raft-node: &raft-node
+  image: ${RAFTLAB_IMAGE:?RAFTLAB_IMAGE is required}
+  restart: unless-stopped
+  environment:
+    CONFIG_PATH: /app/config.yaml
+    API_ADDRESS: :8080
+    BUILD_VERSION: ${IMAGE_TAG:-unknown}
+  networks: [raft-network]
+  healthcheck:
+    test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/health"]
+    interval: 10s
+    timeout: 3s
+    retries: 12
+    start_period: 15s
+
+services:
+  node1:
+    <<: *raft-node
+    volumes:
+      - ./configs/docker/node1.yaml:/app/config.yaml:ro
+      - node1-data:/app/data/node1
+  node2:
+    <<: *raft-node
+    volumes:
+      - ./configs/docker/node2.yaml:/app/config.yaml:ro
+      - node2-data:/app/data/node2
+  node3:
+    <<: *raft-node
+    volumes:
+      - ./configs/docker/node3.yaml:/app/config.yaml:ro
+      - node3-data:/app/data/node3
+  node4:
+    <<: *raft-node
+    volumes:
+      - ./configs/docker/node4.yaml:/app/config.yaml:ro
+      - node4-data:/app/data/node4
+  node5:
+    <<: *raft-node
+    volumes:
+      - ./configs/docker/node5.yaml:/app/config.yaml:ro
+      - node5-data:/app/data/node5
+  dashboard:
+    image: ${DASHBOARD_IMAGE:?DASHBOARD_IMAGE is required}
+    restart: unless-stopped
+    environment:
+      RAFTLAB_NODE_URLS: http://node1:8080,http://node2:8080,http://node3:8080,http://node4:8080,http://node5:8080
+    networks: [raft-network]
+    depends_on:
+      node1: { condition: service_healthy }
+      node2: { condition: service_healthy }
+      node3: { condition: service_healthy }
+      node4: { condition: service_healthy }
+      node5: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      CADDY_DOMAIN: ${CADDY_DOMAIN:?CADDY_DOMAIN is required}
+    networks: [raft-network]
+    depends_on:
+      dashboard: { condition: service_healthy }
+
+networks:
+  raft-network:
+    driver: bridge
+
+volumes:
+  node1-data:
+  node2-data:
+  node3-data:
+  node4-data:
+  node5-data:
+  caddy-data:
+  caddy-config:

@@ -3,10 +3,34 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"math"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
 )
+
+const maxChaosDelayMilliseconds = int64(1<<63-1) / int64(time.Millisecond)
+
+func validateChaosLatency(req ChaosLatencyRequest) error {
+	if req.MinDelayMs < 0 || req.MaxDelayMs < 0 {
+		return fmt.Errorf("latency values must be non-negative")
+	}
+	if req.MinDelayMs > req.MaxDelayMs {
+		return fmt.Errorf("minimum latency cannot exceed maximum latency")
+	}
+	if req.MaxDelayMs > maxChaosDelayMilliseconds {
+		return fmt.Errorf("latency exceeds the supported duration")
+	}
+	return nil
+}
+
+func validatePacketLoss(probability float64) error {
+	if math.IsNaN(probability) || math.IsInf(probability, 0) || probability < 0 || probability > 1 {
+		return fmt.Errorf("probability must be between 0 and 1")
+	}
+	return nil
+}
 
 func (s *Server) handleHealth(c fiber.Ctx) error {
 	if err := s.ensureManager(); err != nil {
@@ -134,6 +158,9 @@ func (s *Server) handleChaosLatency(c fiber.Ctx) error {
 	if err := json.Unmarshal(c.Body(), &req); err != nil {
 		return badRequest("invalid latency request body")
 	}
+	if err := validateChaosLatency(req); err != nil {
+		return badRequest(err.Error())
+	}
 
 	minDelay := time.Duration(req.MinDelayMs) * time.Millisecond
 	maxDelay := time.Duration(req.MaxDelayMs) * time.Millisecond
@@ -153,6 +180,9 @@ func (s *Server) handleChaosPacketLoss(c fiber.Ctx) error {
 	var req ChaosPacketLossRequest
 	if err := json.Unmarshal(c.Body(), &req); err != nil {
 		return badRequest("invalid packet loss request body")
+	}
+	if err := validatePacketLoss(req.Probability); err != nil {
+		return badRequest(err.Error())
 	}
 
 	if err := s.manager.SetChaosPacketLoss(userContext(c), req.Probability); err != nil {

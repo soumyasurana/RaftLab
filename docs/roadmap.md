@@ -211,9 +211,9 @@ Measure:
 * Recovery time
 * Replication performance
 
-### Kubernetes Deployment
+### Compute Engine Deployment
 
-Deploy the cluster using Kubernetes with StatefulSets and persistent volumes.
+Deploy the cluster with Docker Compose on a Compute Engine VM and persistent Docker volumes.
 
 ### Security
 

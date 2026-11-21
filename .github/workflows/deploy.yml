@@ -22,7 +22,6 @@ env:
   GAR_REPOSITORY: ${{ secrets.GAR_REPOSITORY }}
   GCE_INSTANCE: ${{ secrets.GCE_INSTANCE }}
   GCE_ZONE: ${{ secrets.GCE_ZONE }}
-  GCE_DEPLOY_USER: ${{ secrets.GCE_DEPLOY_USER }}
   CADDY_DOMAIN: ${{ secrets.CADDY_DOMAIN }}
 
 jobs:
@@ -35,7 +34,8 @@ jobs:
           github.event.workflow_run.event == 'push'
         )
       }}
-    name: Build and deploy
+
+    name: Build and stage release
     runs-on: ubuntu-latest
     environment: production
 
@@ -50,6 +50,7 @@ jobs:
         env:
           WIF_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+        shell: bash
         run: |
           set -euo pipefail
 
@@ -59,7 +60,6 @@ jobs:
             GAR_REPOSITORY \
             GCE_INSTANCE \
             GCE_ZONE \
-            GCE_DEPLOY_USER \
             CADDY_DOMAIN \
             WIF_PROVIDER \
             SERVICE_ACCOUNT
@@ -84,11 +84,16 @@ jobs:
         uses: google-github-actions/setup-gcloud@v2
 
       - name: Configure Artifact Registry authentication
+        shell: bash
         run: |
+          set -euo pipefail
+
           gcloud auth configure-docker \
-            "${GCP_REGION}-docker.pkg.dev" --quiet
+            "${GCP_REGION}-docker.pkg.dev" \
+            --quiet
 
       - name: Build and push images
+        shell: bash
         env:
           IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
@@ -100,20 +105,45 @@ jobs:
           RAFT_IMAGE="${PREFIX}/raftlab:${IMAGE_TAG}"
           DASHBOARD_IMAGE="${PREFIX}/raftlab-dashboard:${IMAGE_TAG}"
 
+          echo "Building RaftLab backend..."
           docker build \
             --file deployments/Dockerfile \
             --tag "$RAFT_IMAGE" .
 
+          echo "Building RaftLab dashboard..."
           docker build \
             --file dashboard/Dockerfile \
             --tag "$DASHBOARD_IMAGE" .
 
+          echo "Publishing backend..."
           docker push "$RAFT_IMAGE"
+
+          echo "Publishing dashboard..."
           docker push "$DASHBOARD_IMAGE"
 
-          echo "Images published for ${IMAGE_TAG}"
+          echo "Images published for commit ${IMAGE_TAG}"
+
+      - name: Verify VM SSH and sudo
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gcloud compute ssh "$GCE_INSTANCE" \
+            --project="$GCP_PROJECT_ID" \
+            --zone="$GCE_ZONE" \
+            --tunnel-through-iap \
+            --quiet \
+            --command='
+              set -e
+              echo SSH_CONNECTION_SUCCESSFUL
+              whoami
+              id
+              sudo -n true
+              echo SSH_AND_SUDO_OK
+            '
 
       - name: Stage release through IAP
+        shell: bash
         env:
           IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
@@ -125,13 +155,16 @@ jobs:
           RAFT_IMAGE="${PREFIX}/raftlab:${IMAGE_TAG}"
           DASHBOARD_IMAGE="${PREFIX}/raftlab-dashboard:${IMAGE_TAG}"
 
-          TARGET="${GCE_DEPLOY_USER}@${GCE_INSTANCE}"
+          TARGET="${GCE_INSTANCE}"
 
           SSH_ARGS=(
+            --project "$GCP_PROJECT_ID"
             --zone "$GCE_ZONE"
             --tunnel-through-iap
             --quiet
           )
+
+          echo "Creating remote staging directory..."
 
           STAGING=$(
             gcloud compute ssh "$TARGET" \
@@ -139,14 +172,25 @@ jobs:
               --command='mktemp -d /tmp/raftlab-release.XXXXXXXX'
           )
 
-          [[ "$STAGING" =~ ^/tmp/raftlab-release\.[[:alnum:]]{8}$ ]]
+          STAGING="${STAGING//$'\r'/}"
+          STAGING="${STAGING%$'\n'}"
+
+          if [[ ! "$STAGING" =~ ^/tmp/raftlab-release\.[A-Za-z0-9]{8}$ ]]; then
+            echo "::error::Unexpected staging directory: $STAGING"
+            exit 1
+          fi
+
+          echo "Staging directory: $STAGING"
 
           cleanup() {
             gcloud compute ssh "$TARGET" \
               "${SSH_ARGS[@]}" \
               --command="rm -rf -- '$STAGING'" || true
           }
+
           trap cleanup EXIT
+
+          echo "Uploading deployment configurations..."
 
           gcloud compute scp --recurse \
             deployments/configs \
@@ -168,17 +212,26 @@ jobs:
               "$CADDY_DOMAIN" | base64 -w0
           )
 
-          gcloud compute ssh "$TARGET" \
-            "${SSH_ARGS[@]}" \
-            --command="sudo bash -s -- '$IMAGE_TAG' '$RELEASE_ENV' '$STAGING'" <<'REMOTE'
+          echo "Preparing release on Compute Engine..."
+
+          # Transfer the remote script as a file. This avoids
+          # depending on gcloud SSH heredoc stdin forwarding.
+          REMOTE_SCRIPT=$(mktemp)
+          trap 'rm -f "$REMOTE_SCRIPT"; cleanup' EXIT
+
+          cat > "$REMOTE_SCRIPT" <<'REMOTE'
+          #!/usr/bin/env bash
           set -euo pipefail
 
           tag="$1"
           env_b64="$2"
           staging="$3"
 
+          [[ "$tag" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$staging" =~ ^/tmp/raftlab-release\.[A-Za-z0-9]{8}$ ]]
+
           release="/opt/raftlab/releases/$tag"
-          current="/opt/raftlab/current"
+          project_file="/opt/raftlab/compose-project"
 
           mkdir -p "$release/configs/docker"
 
@@ -194,19 +247,18 @@ jobs:
           printf '%s' "$env_b64" | base64 -d > "$release/.env"
           chmod 600 "$release/.env"
 
-          # Pin the existing Compose project identity.
-          # Set this on the VM before deployment.
-          project_file="/opt/raftlab/compose-project"
-
           if [[ ! -s "$project_file" ]]; then
-            echo "Missing $project_file"
-            echo "Identify the existing Compose project before deployment."
+            echo "ERROR: Missing $project_file"
+            echo "Set the existing Compose project name first."
             exit 1
           fi
 
           project=$(cat "$project_file")
 
-          [[ "$project" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || exit 1
+          if [[ ! "$project" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+            echo "ERROR: Invalid Compose project name."
+            exit 1
+          fi
 
           compose_release() {
             docker compose \
@@ -217,16 +269,33 @@ jobs:
               "$@"
           }
 
-          # Verify registry access and download images.
-          # VM Docker authentication must be configured beforehand.
-          compose_release pull
-
-          # Validate the Compose configuration without restarting services.
+          echo "Validating Compose configuration..."
           compose_release config --quiet
 
-          # Do not automatically restart a live Raft cluster.
-          # The new no-op log entry requires a coordinated upgrade.
+          echo "Checking Docker registry authentication..."
+          if ! docker pull "$(grep '^RAFTLAB_IMAGE=' "$release/.env" | cut -d= -f2-)"; then
+            echo "ERROR: VM cannot pull from Artifact Registry."
+            echo "Configure VM registry credentials and permissions."
+            exit 1
+          fi
+
+          echo "Pulling release images..."
+          compose_release pull
+
           echo "Release staged successfully: $release"
-          echo "Images pulled and Compose configuration validated."
-          echo "Activation requires a coordinated Raft upgrade."
+          echo "Compose project: $project"
+          echo "All release images downloaded."
+          echo "No running Raft services were restarted."
+          echo "Activation requires a coordinated upgrade."
           REMOTE
+
+          gcloud compute scp \
+            "$REMOTE_SCRIPT" \
+            "$TARGET:$STAGING/deploy.sh" \
+            "${SSH_ARGS[@]}"
+
+          gcloud compute ssh "$TARGET" \
+            "${SSH_ARGS[@]}" \
+            --command="sudo -n bash '$STAGING/deploy.sh' '$IMAGE_TAG' '$RELEASE_ENV' '$STAGING'"
+
+          echo "Release staging completed successfully."

@@ -22,6 +22,10 @@ export async function POST(request: Request) {
     return Response.json({ success: false, message: "Invalid JSON request body." }, { status: 400 });
   }
 
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return Response.json({ success: false, message: "Action request must be an object." }, { status: 400 });
+  }
+
   if (!isDashboardAction(body.action)) {
     return Response.json({ success: false, message: "Unsupported dashboard action." }, { status: 400 });
   }
@@ -41,7 +45,7 @@ export async function POST(request: Request) {
     );
   }
 
-  if (body.nodeUrl && !nodeUrls.includes(body.nodeUrl)) {
+  if (body.nodeUrl !== undefined && !nodeUrls.includes(body.nodeUrl)) {
     return Response.json({ success: false, message: "Target is not a configured management API." }, { status: 400 });
   }
 
@@ -52,7 +56,8 @@ export async function POST(request: Request) {
       : await issueNodeAction(nodeUrl, body.action, payload);
 
     return Response.json(result, { status: result.success ? 200 : 502 });
-  } catch {
-    return Response.json({ success: false, message: "Management API action failed." }, { status: 502 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Management API action failed.";
+    return Response.json({ success: false, message }, { status: 502 });
   }
 }

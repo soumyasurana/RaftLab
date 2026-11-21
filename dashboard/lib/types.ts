@@ -81,6 +81,7 @@ export interface ChaosStatusResponse {
 
 export interface NodeSnapshot {
   baseUrl: string;
+  nodeId?: string;
   healthy: boolean;
   latencyMs: number;
   error?: string;

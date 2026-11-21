@@ -2,6 +2,7 @@ package raft
 
 import (
 	"context"
+	"log"
 	"time"
 
 	pb "github.com/soumyasurana/RaftLab/internal/pb/raft"
@@ -10,53 +11,61 @@ import (
 
 const appendEntriesTimeout = 200 * time.Millisecond
 
-func (n *Node) replicateToPeer(peerID string) {
+func (n *Node) replicateToPeers(term uint64) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	if n.stopped || n.role != Leader || n.persistent.CurrentTerm != term {
+		return
+	}
+	for _, peer := range n.config.Node.Peers {
+		if inFlightTerm, ok := n.replicating[peer.ID]; ok && inFlightTerm == term {
+			continue
+		}
+		n.replicating[peer.ID] = term
+		go n.replicateToPeer(peer.ID, term)
+	}
+}
+
+func (n *Node) replicateToPeer(peerID types.NodeID, term uint64) {
+	defer func() {
+		n.mu.Lock()
+		if n.replicating[peerID] == term {
+			delete(n.replicating, peerID)
+		}
+		n.mu.Unlock()
+	}()
 
 	n.mu.RLock()
-
-	if n.role != Leader {
+	if n.stopped || n.role != Leader || n.persistent.CurrentTerm != term {
 		n.mu.RUnlock()
 		return
 	}
 
-	nextIndex := n.volatile.NextIndex[types.NodeID(peerID)]
+	nextIndex := n.volatile.NextIndex[peerID]
 	lastIncludedIndex := n.volatile.LastIncludedIndex
-	lastIncludedTerm := n.volatile.LastIncludedTerm
-
+	leaderCommit := n.volatile.CommitIndex
 	if nextIndex <= lastIncludedIndex {
 		n.mu.RUnlock()
-		n.sendInstallSnapshot(peerID)
+		n.sendInstallSnapshot(string(peerID), term)
 		return
 	}
 
-	term := n.persistent.CurrentTerm
-	leaderCommit := n.volatile.CommitIndex
-
-	n.mu.RUnlock()
-
-	var (
-		prevIndex uint64
-		prevTerm  uint64
-	)
-
-	if nextIndex > 1 {
-		if nextIndex-1 == lastIncludedIndex {
-			prevIndex = lastIncludedIndex
-			prevTerm = lastIncludedTerm
-		} else {
-			entry, ok, err := n.wal.EntryAt(nextIndex - 1)
-			if err != nil {
-				return
-			}
-
-			if ok {
-				prevIndex = uint64(entry.Index)
-				prevTerm = uint64(entry.Term)
-			}
+	prevIndex := nextIndex - 1
+	var prevTerm uint64
+	if prevIndex == lastIncludedIndex {
+		prevTerm = n.volatile.LastIncludedTerm
+	} else {
+		entry, ok, err := n.wal.EntryAt(prevIndex)
+		if err != nil || !ok {
+			n.mu.RUnlock()
+			return
 		}
+		prevTerm = uint64(entry.Term)
 	}
 
 	logEntries, err := n.wal.EntriesFrom(nextIndex)
+	n.mu.RUnlock()
 	if err != nil {
 		return
 	}
@@ -84,7 +93,7 @@ func (n *Node) replicateToPeer(peerID string) {
 
 	response, err := n.rpcClient.AppendEntries(
 		ctx,
-		peerID,
+		string(peerID),
 		&pb.AppendEntriesRequest{
 			Term:         term,
 			LeaderId:     string(n.config.Node.ID),
@@ -103,7 +112,8 @@ func (n *Node) replicateToPeer(peerID string) {
 	}
 
 	n.handleAppendEntriesResponse(
-		peerID,
+		string(peerID),
+		term,
 		response,
 		prevIndex,
 		len(entries),
@@ -113,6 +123,7 @@ func (n *Node) replicateToPeer(peerID string) {
 // handleAppendEntriesResponse updates leader replication state.
 func (n *Node) handleAppendEntriesResponse(
 	peerID string,
+	term uint64,
 	response *pb.AppendEntriesResponse,
 	prevIndex uint64,
 	replicated int,
@@ -120,12 +131,15 @@ func (n *Node) handleAppendEntriesResponse(
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
+	if n.stopped {
+		return
+	}
 	if response.Term > n.persistent.CurrentTerm {
-		n.becomeFollowerLocked(response.Term)
+		n.stepDownAfterResponse(response.Term)
 		return
 	}
 
-	if n.role != Leader {
+	if n.role != Leader || n.persistent.CurrentTerm != term || response.Term != term {
 		return
 	}
 
@@ -150,25 +164,17 @@ func (n *Node) handleAppendEntriesResponse(
 
 	// Replication failed.
 	// Decrement NextIndex so the next AppendEntries retries from an earlier log position.
-	if n.volatile.NextIndex[nodeID] > 1 {
+	if n.volatile.NextIndex[nodeID] == prevIndex+1 && prevIndex > n.volatile.MatchIndex[nodeID] {
 		n.volatile.NextIndex[nodeID]--
 	}
 }
 
 // sendInstallSnapshot sends the most recent snapshot to a follower.
-func (n *Node) sendInstallSnapshot(peerID string) {
+func (n *Node) sendInstallSnapshot(peerID string, term uint64) {
 	snap, exists, err := n.snapshotStore.Load()
 	if err != nil || !exists {
 		return
 	}
-
-	n.mu.RLock()
-	if n.role != Leader {
-		n.mu.RUnlock()
-		return
-	}
-	term := n.persistent.CurrentTerm
-	n.mu.RUnlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), appendEntriesTimeout*2)
 	defer cancel()
@@ -192,12 +198,15 @@ func (n *Node) sendInstallSnapshot(peerID string) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
+	if n.stopped {
+		return
+	}
 	if resp.Term > n.persistent.CurrentTerm {
-		n.becomeFollowerLocked(resp.Term)
+		n.stepDownAfterResponse(resp.Term)
 		return
 	}
 
-	if n.role != Leader {
+	if n.role != Leader || n.persistent.CurrentTerm != term || resp.Term != term {
 		return
 	}
 
@@ -207,4 +216,14 @@ func (n *Node) sendInstallSnapshot(peerID string) {
 		n.volatile.NextIndex[nodeID] = snap.LastIncludedIndex + 1
 		n.volatile.MatchIndex[nodeID] = snap.LastIncludedIndex
 	}
+}
+
+// stepDownAfterResponse handles a newer term observed by the leader.
+// The caller must hold n.mu.
+func (n *Node) stepDownAfterResponse(term uint64) {
+	if err := n.becomeFollowerLocked(term); err != nil {
+		log.Printf("persist newer term: %v", err)
+		return
+	}
+	n.electionTimer.reset()
 }

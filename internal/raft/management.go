@@ -67,6 +67,7 @@ func (n *Node) Status(ctx context.Context) (api.StatusResponse, error) {
 	}
 
 	n.mu.RLock()
+	defer n.mu.RUnlock()
 	status := api.StatusResponse{
 		Role:              n.role.String(),
 		CurrentTerm:       n.persistent.CurrentTerm,
@@ -76,8 +77,6 @@ func (n *Node) Status(ctx context.Context) (api.StatusResponse, error) {
 		LastIncludedIndex: n.volatile.LastIncludedIndex,
 		LastIncludedTerm:  n.volatile.LastIncludedTerm,
 	}
-	n.mu.RUnlock()
-
 	entries, err := n.wal.ReadAll()
 	if err != nil {
 		return api.StatusResponse{}, err
@@ -203,6 +202,8 @@ func (n *Node) StateMachineSnapshot(ctx context.Context) (map[string]string, err
 		return nil, err
 	}
 
+	n.mu.RLock()
+	defer n.mu.RUnlock()
 	return n.stateMachine.Snapshot(), nil
 }
 
@@ -243,6 +244,9 @@ func (n *Node) TriggerSnapshot(ctx context.Context) (api.SnapshotResponse, error
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
+	if n.stopped {
+		return api.SnapshotResponse{}, fmt.Errorf("node is stopped")
+	}
 	if err := n.takeSnapshot(); err != nil {
 		return api.SnapshotResponse{}, err
 	}

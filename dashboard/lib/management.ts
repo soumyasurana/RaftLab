@@ -27,11 +27,10 @@ function readNodeUrls() {
     return [];
   }
 
-  return raw
+  return [...new Set(raw
     .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean)
-    .map((value) => value.replace(/\/+$/, ""));
+    .map((value) => value.trim().replace(/\/+$/, ""))
+    .filter(Boolean))];
 }
 
 function toNumber(value: string | number | undefined, fallback = 0) {
@@ -58,19 +57,21 @@ async function fetchJson<T>(
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
+    const headers = new Headers(init.headers);
+    headers.set("Accept", "application/json");
+    if (init.body) {
+      headers.set("Content-Type", "application/json");
+    }
     const response = await fetch(url, {
+      ...init,
       cache: "no-store",
       signal: controller.signal,
-      headers: {
-        Accept: "application/json",
-        ...(init.body ? { "Content-Type": "application/json" } : {}),
-        ...(init.headers ?? {}),
-      },
-      ...init,
+      headers,
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      const body = await response.json().catch(() => null);
+      throw new Error(typeof body?.error === "string" ? body.error : `HTTP ${response.status}`);
     }
 
     return (await response.json()) as T;
@@ -81,7 +82,7 @@ async function fetchJson<T>(
 
 async function tryFetchJson<T>(url: string, timeoutMs = DEFAULT_TIMEOUT_MS) {
   try {
-    return await fetchJson<T>(url, timeoutMs);
+    return (await fetchJson<T>(url, timeoutMs)) ?? undefined;
   } catch {
     return undefined;
   }
@@ -100,10 +101,14 @@ function normalizeNodeState(state: ChaosStatusResponse | undefined) {
 }
 
 export async function fetchNodeSnapshot(baseUrl: string): Promise<NodeSnapshot> {
-  const started = performance.now();
+  const healthRequest = (async () => {
+    const started = performance.now();
+    const health = await tryFetchJson<HealthResponse>(`${baseUrl}/health`);
+    return { health, latencyMs: Math.round(performance.now() - started) };
+  })();
 
-  const [health, status, peers, state, metrics, chaos] = await Promise.all([
-    tryFetchJson<HealthResponse>(`${baseUrl}/health`),
+  const [{ health, latencyMs }, status, peers, state, metrics, chaos] = await Promise.all([
+    healthRequest,
     tryFetchJson<StatusResponse>(`${baseUrl}/status`),
     tryFetchJson<PeerResponse[]>(`${baseUrl}/peers`),
     tryFetchJson<Record<string, string>>(`${baseUrl}/state`),
@@ -112,12 +117,12 @@ export async function fetchNodeSnapshot(baseUrl: string): Promise<NodeSnapshot> 
   ]);
 
   const chaosState = normalizeNodeState(chaos);
-  const simulatedCrash = Boolean(health && chaosState?.nodes[health.nodeId]?.crashed);
+  const simulatedCrash = Boolean(health && chaosState?.enabled && chaosState.nodes[health.nodeId]?.crashed);
   const healthy = Boolean(health && status) && !simulatedCrash;
-  const latencyMs = Math.max(0, Math.round(performance.now() - started));
 
   return {
     baseUrl,
+    nodeId: health?.nodeId,
     healthy,
     latencyMs,
     health,
@@ -132,7 +137,8 @@ export async function fetchNodeSnapshot(baseUrl: string): Promise<NodeSnapshot> 
 
 function summarize(nodes: NodeSnapshot[]): ClusterSummary {
   const healthyNodes = nodes.filter((node) => node.healthy && node.health && node.status);
-  const leader = healthyNodes.find((node) => node.health?.role === "Leader");
+  const leaders = healthyNodes.filter((node) => node.health?.role === "Leader");
+  const leader = leaders.length === 1 ? leaders[0] : undefined;
   const followers = healthyNodes.filter((node) => node.health?.role === "Follower").length;
   const commitIndex = Math.max(...healthyNodes.map((node) => node.status?.commitIndex ?? 0), 0);
   const lastApplied = Math.max(...healthyNodes.map((node) => node.status?.lastApplied ?? 0), 0);
@@ -154,7 +160,7 @@ function summarize(nodes: NodeSnapshot[]): ClusterSummary {
     status = "unstable";
   } else if (healthyNodes.length === nodes.length) {
     status = "healthy";
-  } else if (healthyNodes.length > 0) {
+  } else if (healthyNodes.length > nodes.length / 2) {
     status = "degraded";
   }
 
@@ -256,12 +262,15 @@ export async function issueClusterChaosAction(action: DashboardAction, payload: 
   const results = await Promise.allSettled(
     nodeUrls.map((nodeUrl) => issueNodeAction(nodeUrl, action, payload)),
   );
-  const failures = results.filter((result) => result.status === "rejected");
+  const failures = results.filter((result) => result.status === "rejected" || !result.value.success);
 
   if (failures.length > 0) {
+    const messages = failures.map((result) => result.status === "rejected"
+      ? (result.reason instanceof Error ? result.reason.message : "Management API action failed.")
+      : (("message" in result.value && result.value.message) || "Management API action failed."));
     return {
       success: false,
-      message: `Applied on ${nodeUrls.length - failures.length}/${nodeUrls.length} nodes.`,
+      message: `Applied on ${nodeUrls.length - failures.length}/${nodeUrls.length} nodes. ${[...new Set(messages)].join(" ")}`,
     } satisfies ActionResponse;
   }
 
@@ -270,32 +279,4 @@ export async function issueClusterChaosAction(action: DashboardAction, payload: 
 
 export function getConfiguredNodeUrls() {
   return readNodeUrls();
-}
-
-export function toDisplayUptime(value: string | number | undefined) {
-  const numeric = toNumber(value, 0);
-
-  if (numeric <= 0) {
-    return "0s";
-  }
-
-  const seconds = numeric / 1_000_000_000;
-  const minutes = seconds / 60;
-  const hours = minutes / 60;
-
-  if (hours >= 1) {
-    return `${hours.toFixed(1)}h`;
-  }
-
-  if (minutes >= 1) {
-    return `${minutes.toFixed(1)}m`;
-  }
-
-  return `${seconds.toFixed(1)}s`;
-}
-
-export function estimateReplicationLatency(node: NodeSnapshot, leaderCommit: number) {
-  const matchIndex = node.status?.commitIndex ?? 0;
-  const lagEntries = Math.max(0, leaderCommit - matchIndex);
-  return Math.max(node.latencyMs, lagEntries * 45);
 }

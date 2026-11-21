@@ -13,7 +13,7 @@ import {
   type Node,
   type NodeProps,
 } from "@xyflow/react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, MotionConfig, motion, useReducedMotion } from "framer-motion";
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -65,7 +65,6 @@ import {
   connectedPeers,
   deriveTimelineEvents,
   durationToMs,
-  estimateReplicationLatency,
   formatRole,
   pickLeader,
   replicationLag,
@@ -108,12 +107,8 @@ const SECTION_LABELS: Record<string, string> = {
   health: "Cluster Health",
 };
 
-function getNodeKey(node: NodeSnapshot, index: number) {
-  return node.health?.nodeId ?? node.baseUrl ?? `node-${index + 1}`;
-}
-
-function getNodeLabel(node: NodeSnapshot, index: number) {
-  return node.health?.nodeId ?? node.baseUrl.match(/node\d+/i)?.[0] ?? `Node ${index + 1}`;
+function getNodeLabel(node: NodeSnapshot) {
+  return node.nodeId ?? node.baseUrl.replace(/^https?:\/\//, "");
 }
 
 function SectionCard({
@@ -131,7 +126,7 @@ function SectionCard({
 }) {
   return (
     <Card id={id} className="scroll-mt-24 overflow-hidden">
-      <CardHeader className="flex-row items-start justify-between gap-4">
+      <CardHeader className="items-start gap-4 sm:flex-row sm:justify-between">
         <div>
           <CardTitle>{title}</CardTitle>
           <CardDescription>{description}</CardDescription>
@@ -175,7 +170,6 @@ function StatusCard({ icon: Icon, label, value, detail, accent }: StatusCardProp
 type ClusterNodeData = {
   node: NodeSnapshot;
   displayName: string;
-  leaderId?: string;
   selected: boolean;
 };
 
@@ -201,7 +195,7 @@ function healthTone(isHealthy: boolean) {
 }
 
 function ClusterNodeView({ data }: NodeProps<Node<ClusterNodeData>>) {
-  const role = data.node.health?.role ?? data.node.status?.role ?? "Offline";
+  const role = data.node.healthy ? data.node.health?.role : "Offline";
 
   return (
     <div
@@ -215,8 +209,8 @@ function ClusterNodeView({ data }: NodeProps<Node<ClusterNodeData>>) {
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-sm font-semibold text-white">{data.displayName}</div>
-          <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300/70">
-            {data.node.health?.nodeId ?? data.node.baseUrl}
+          <div className="break-all text-[11px] tracking-wide text-slate-300/80">
+            {data.node.baseUrl.replace(/^https?:\/\//, "")}
           </div>
           <div className="text-xs uppercase tracking-[0.18em] text-slate-300/80">
             {formatRole(role)}
@@ -231,7 +225,7 @@ function ClusterNodeView({ data }: NodeProps<Node<ClusterNodeData>>) {
         <InfoPill label="Term" value={String(data.node.health?.currentTerm ?? data.node.status?.currentTerm ?? 0)} />
         <InfoPill label="Commit" value={String(data.node.status?.commitIndex ?? 0)} />
         <InfoPill label="Applied" value={String(data.node.status?.lastApplied ?? 0)} />
-        <InfoPill label="Latency" value={`${data.node.latencyMs}ms`} />
+        <InfoPill label="API response" value={data.node.health ? `${data.node.latencyMs} ms` : "—"} />
       </div>
 
       <div className="mt-3 flex items-center justify-between text-xs text-slate-300">
@@ -253,8 +247,10 @@ function InfoPill({ label, value }: { label: string; value: string }) {
   );
 }
 
+const nodeTypes = { clusterNode: ClusterNodeView };
+
 function nodeColor(node: NodeSnapshot) {
-  const role = node.health?.role ?? node.status?.role ?? "Offline";
+  const role = node.healthy ? node.health?.role : "Offline";
   switch (role) {
     case "Leader":
       return "#34d399";
@@ -271,74 +267,63 @@ function useClusterFeed() {
   const [cluster, setCluster] = useState<ClusterResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<ConnectionMode>("loading");
-  const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
-  const mountedRef = useRef(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const refreshRef = useRef(() => {});
 
   useEffect(() => {
-    mountedRef.current = true;
-    const applyCluster = (payload: ClusterResponse) => {
-      if (!mountedRef.current) {
-        return;
-      }
-      setCluster(payload);
-      setError(null);
-      setLastUpdatedAt(new Date().toISOString());
-    };
+    let timer: ReturnType<typeof setTimeout>;
+    let activeRequest: AbortController | undefined;
 
-    let pollTimer: ReturnType<typeof setInterval> | null = null;
+    const poll = async () => {
+      clearTimeout(timer);
+      activeRequest?.abort();
+      const controller = new AbortController();
+      activeRequest = controller;
+      const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(8000)]);
+      setIsRefreshing(true);
 
-    const stopPolling = () => {
-      if (pollTimer) {
-        clearInterval(pollTimer);
-        pollTimer = null;
-      }
-    };
-
-    const pollOnce = async () => {
       try {
-        const response = await fetch("/api/cluster", { cache: "no-store" });
+        const response = await fetch("/api/cluster", { cache: "no-store", signal });
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`);
         }
-
-        applyCluster((await response.json()) as ClusterResponse);
-        setMode("polling");
-      } catch (pollError) {
-        if (!mountedRef.current) {
+        const payload = (await response.json()) as ClusterResponse;
+        if (controller.signal.aborted) {
           return;
         }
-        setError(pollError instanceof Error ? pollError.message : "Failed to load cluster");
-        setMode("offline");
+
+        setCluster((previous) => {
+          const knownIds = new Map(previous?.nodes.map((node) => [node.baseUrl, node.nodeId]));
+          return {
+            ...payload,
+            nodes: payload.nodes.map((node) => ({ ...node, nodeId: node.nodeId ?? knownIds.get(node.baseUrl) })),
+          };
+        });
+        setMode("polling");
+        setError(null);
+      } catch (pollError) {
+        if (!controller.signal.aborted) {
+          setError(pollError instanceof Error ? pollError.message : "Failed to load cluster");
+          setMode("offline");
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsRefreshing(false);
+          timer = setTimeout(poll, 2000);
+        }
       }
     };
 
-    const startPolling = () => {
-      stopPolling();
-      setMode("polling");
-      void pollOnce();
-      pollTimer = setInterval(() => {
-        void pollOnce();
-      }, 2000);
-    };
-
-    startPolling();
-
+    refreshRef.current = () => void poll();
+    void poll();
     return () => {
-      mountedRef.current = false;
-      stopPolling();
+      clearTimeout(timer);
+      activeRequest?.abort();
+      refreshRef.current = () => {};
     };
   }, []);
 
-  return { cluster, error, mode, refresh: async () => {
-    setMode("polling");
-    const response = await fetch("/api/cluster", { cache: "no-store" });
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    const payload = (await response.json()) as ClusterResponse;
-    setCluster(payload);
-    setLastUpdatedAt(new Date().toISOString());
-  }, lastUpdatedAt };
+  return { cluster, error, mode, isRefreshing, refresh: () => refreshRef.current(), lastUpdatedAt: cluster?.observedAt };
 }
 
 function useTimeline(cluster: ClusterResponse | null) {
@@ -376,13 +361,21 @@ function actionLabel(action: string) {
       return "Inject packet loss";
     case "setPartition":
       return "Inject partition";
+    case "crashNode":
+      return "Crash node";
+    case "restartNode":
+      return "Restart node";
+    case "disconnectNode":
+      return "Disconnect node";
+    case "reconnectNode":
+      return "Reconnect node";
     default:
       return action;
   }
 }
 
 export function DashboardApp() {
-  const { cluster, error, mode, refresh, lastUpdatedAt } = useClusterFeed();
+  const { cluster, error, mode, isRefreshing, refresh, lastUpdatedAt } = useClusterFeed();
   const { events } = useTimeline(cluster);
   const [selectedNodeId, setSelectedNodeId] = useState<string>("");
   const [viewMode, setViewMode] = useState<ViewMode>("table");
@@ -396,49 +389,30 @@ export function DashboardApp() {
   const [minLatency, setMinLatency] = useState("25");
   const [maxLatency, setMaxLatency] = useState("180");
   const [packetLoss, setPacketLoss] = useState("12");
-  const [partitionGroups, setPartitionGroups] = useState("leader|followers");
+  const [partitionGroups, setPartitionGroups] = useState("");
   const [isBusy, setIsBusy] = useState(false);
+  const reduceMotion = useReducedMotion();
+  const menuButton = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    if (!cluster) {
+    if (!isSidebarOpen) {
       return;
     }
-
-    setHistory((current) => [...current.slice(-14), cluster]);
-
-    const preferredNode =
-      cluster.nodes.find((node) => node.health?.nodeId === cluster.summary.leaderId) ?? cluster.nodes[0];
-
-    if (!selectedNodeId && preferredNode) {
-      setSelectedNodeId(getNodeKey(preferredNode, cluster.nodes.indexOf(preferredNode)));
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsSidebarOpen(false);
+        menuButton.current?.focus();
+      }
     }
-
-    if (!targetNodeId && preferredNode) {
-      setTargetNodeId(getNodeKey(preferredNode, cluster.nodes.indexOf(preferredNode)));
-    }
-  }, [cluster, selectedNodeId, targetNodeId]);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [isSidebarOpen]);
 
   useEffect(() => {
-    if (!cluster?.nodes.length) {
-      return;
+    if (cluster) {
+      setHistory((current) => [...current.slice(-14), cluster]);
     }
-
-    const firstKey = getNodeKey(cluster.nodes[0], 0);
-    const hasSelectedNode = selectedNodeId
-      ? cluster.nodes.some((node, index) => getNodeKey(node, index) === selectedNodeId)
-      : true;
-    const hasTargetNode = targetNodeId
-      ? cluster.nodes.some((node, index) => getNodeKey(node, index) === targetNodeId)
-      : true;
-
-    if (selectedNodeId && !hasSelectedNode) {
-      setSelectedNodeId(firstKey);
-    }
-
-    if (targetNodeId && !hasTargetNode) {
-      setTargetNodeId(firstKey);
-    }
-  }, [cluster, selectedNodeId, targetNodeId]);
+  }, [cluster]);
 
   useEffect(() => {
     if (!notice) {
@@ -450,12 +424,26 @@ export function DashboardApp() {
   }, [notice]);
 
   const leader = cluster ? pickLeader(cluster.nodes) : undefined;
-  const selectedNode =
-    cluster?.nodes.find((node, index) => getNodeKey(node, index) === selectedNodeId) ?? leader ?? cluster?.nodes[0];
-  const targetNode =
-    cluster?.nodes.find((node, index) => getNodeKey(node, index) === targetNodeId) ?? leader ?? cluster?.nodes[0];
-  const selectedNodeKey = selectedNode ? getNodeKey(selectedNode, cluster?.nodes.indexOf(selectedNode) ?? 0) : undefined;
-  const chaosNode = targetNode ?? selectedNode;
+  const defaultNode = leader ?? cluster?.nodes[0];
+  const selectedNode = cluster?.nodes.find((node) => node.baseUrl === selectedNodeId) ?? defaultNode;
+  const targetNode = cluster?.nodes.find((node) => node.baseUrl === targetNodeId && node.nodeId) ??
+    leader ?? cluster?.nodes.find((node) => node.nodeId);
+  const selectedNodeKey = selectedNode?.baseUrl;
+  const canControl = Boolean(cluster?.nodes.length) && mode === "polling";
+  const canSnapshot = canControl && Boolean(leader);
+  const chaosEnabledCount = cluster?.nodes.filter((node) => node.chaos?.enabled).length ?? 0;
+  const knownNodeIds = cluster?.nodes.flatMap((node) => node.nodeId ? [node.nodeId] : []) ?? [];
+
+  const validLatency = minLatency.trim() !== "" && maxLatency.trim() !== "" &&
+    Number.isInteger(Number(minLatency)) && Number.isInteger(Number(maxLatency)) &&
+    Number(minLatency) >= 0 && Number(maxLatency) >= Number(minLatency);
+
+  const validPacketLoss = packetLoss.trim() !== "" && Number(packetLoss) >= 0 && Number(packetLoss) <= 100;
+
+  const groups = partitionGroups.split("|").map((group) => group.split(",").map((value) => value.trim()).filter(Boolean));
+  const partitionIds = groups.flat();
+  const validPartition = groups.length >= 2 && groups.every((group) => group.length > 0) &&
+    new Set(partitionIds).size === partitionIds.length && partitionIds.every((id) => knownNodeIds.includes(id));
 
   const filteredStateEntries = useMemo(() => {
     const entries = Object.entries(selectedNode?.state ?? {});
@@ -472,28 +460,28 @@ export function DashboardApp() {
     const flowEdges: Edge[] = [];
     const nodes = cluster?.nodes ?? [];
     const leaderNode = pickLeader(nodes);
-    const leaderKey = leaderNode ? getNodeKey(leaderNode, nodes.indexOf(leaderNode)) : undefined;
-    const followers = nodes.filter((node, index) => getNodeKey(node, index) !== leaderKey);
+    const leaderKey = leaderNode ? leaderNode.baseUrl : undefined;
+    const followers = nodes.filter((node) => node.baseUrl !== leaderKey);
 
     const leaderX = 380;
     const leaderY = 80;
-    const followerCols = followers.length;
+    const followerCols = Math.min(3, followers.length);
     const followerSpacingX = 320;
     const gridWidth = (followerCols - 1) * followerSpacingX;
     const startX = leaderX - gridWidth / 2;
-    const startY = 520;
+    const startY = leaderKey ? 365 : 80;
 
-    nodes.forEach((node, index) => {
-      const key = getNodeKey(node, index);
+    nodes.forEach((node) => {
+      const key = node.baseUrl;
       let x = leaderX;
       let y = leaderY;
 
       if (key !== leaderKey) {
         const followerIndex = followers.findIndex(
-          (candidate, candidateIndex) => getNodeKey(candidate, candidateIndex) === key,
+          (candidate) => candidate.baseUrl === key,
         );
-        x = startX + Math.max(0, followerIndex) * followerSpacingX;
-        y = startY;
+        x = startX + (followerIndex % followerCols) * followerSpacingX;
+        y = startY + Math.floor(followerIndex / followerCols) * 270;
       }
 
       flowNodes.push({
@@ -502,8 +490,7 @@ export function DashboardApp() {
         position: { x, y },
         data: {
           node,
-          displayName: getNodeLabel(node, index),
-          leaderId: leaderKey,
+          displayName: getNodeLabel(node),
           selected: key === selectedNodeKey,
         },
       });
@@ -513,75 +500,72 @@ export function DashboardApp() {
 
     if (leaderId) {
       followers.forEach((node) => {
-        const followerKey = getNodeKey(node, nodes.indexOf(node));
+        const followerKey = node.baseUrl;
 
+        const connected = node.healthy && leaderNode?.peers?.some(
+          (peer) => peer.peerId === node.nodeId && peer.connectionState === "connected",
+        );
+        const color = connected ? "#34d399" : "#64748b";
         flowEdges.push({
           id: `edge-${leaderId}-${followerKey}`,
           source: leaderId,
           target: followerKey,
-          animated: true,
+          animated: connected && !reduceMotion,
           type: "straight",
-          markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: "#34d399" },
-          style: { strokeWidth: 2.4, stroke: "#34d399", opacity: 0.7 },
+          markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color },
+          style: { strokeWidth: 2.4, stroke: color, opacity: 0.7, strokeDasharray: connected ? undefined : "6 5" },
         });
       });
     }
 
     return { flowNodes, flowEdges };
-  }, [cluster, selectedNodeKey]);
+  }, [cluster, selectedNodeKey, reduceMotion]);
 
-  const chartData = useMemo(() => {
-    return history.map((snapshot, index) => {
-      const currentLeader = pickLeader(snapshot.nodes) ?? snapshot.nodes[0];
-      const previousSnapshot = history[index - 1];
-      const previousLeader = previousSnapshot ? pickLeader(previousSnapshot.nodes) ?? previousSnapshot.nodes[0] : undefined;
-      const currentMetrics = currentLeader?.metrics;
-      const previousMetrics = previousLeader?.metrics;
-      const elapsedSeconds = previousSnapshot
-        ? Math.max(
-            1,
-            (new Date(snapshot.observedAt).getTime() - new Date(previousSnapshot.observedAt).getTime()) / 1000,
-          )
-        : 2;
+  const chartData = useMemo(() => history.map((snapshot, index) => {
+    const previous = history[index - 1];
+    const elapsedSeconds = previous
+      ? (Date.parse(snapshot.observedAt) - Date.parse(previous.observedAt)) / 1000
+      : 0;
+    const totals = { electionCount: 0, rpcCount: 0, snapshotCount: 0 };
+    let reportedNodes = 0;
+    const rates = { appendEntriesSent: 0, appendEntriesReceived: 0, votes: 0 };
+    let comparedNodes = 0;
 
-      const totalRpc = (currentMetrics?.appendEntriesSent ?? 0) + (currentMetrics?.appendEntriesReceived ?? 0) +
-        (currentMetrics?.votesGranted ?? 0) + (currentMetrics?.votesRejected ?? 0);
+    for (const node of snapshot.nodes) {
+      const metrics = node.metrics;
+      if (!node.healthy || !metrics) {
+        continue;
+      }
+      reportedNodes++;
+      const votes = metrics.votesGranted + metrics.votesRejected;
+      totals.electionCount += metrics.electionsWon + metrics.electionsLost;
+      totals.rpcCount += metrics.appendEntriesSent + votes;
+      totals.snapshotCount += metrics.snapshotsCreated;
 
-      const previousRpc = (previousMetrics?.appendEntriesSent ?? 0) + (previousMetrics?.appendEntriesReceived ?? 0) +
-        (previousMetrics?.votesGranted ?? 0) + (previousMetrics?.votesRejected ?? 0);
+      const previousNode = previous?.nodes.find((candidate) => candidate.baseUrl === node.baseUrl);
+      const before = previousNode?.metrics;
+      if (!previousNode?.healthy || !before || elapsedSeconds <= 0 ||
+          durationToMs(metrics.uptime) < durationToMs(before.uptime)) {
+        continue;
+      }
 
-      const heartbeatsPerSec = Math.max(
-        0,
-        ((currentMetrics?.appendEntriesReceived ?? 0) - (previousMetrics?.appendEntriesReceived ?? 0)) / elapsedSeconds,
-      );
+      comparedNodes++;
+      rates.appendEntriesSent += Math.max(0, metrics.appendEntriesSent - before.appendEntriesSent);
+      rates.appendEntriesReceived += Math.max(0, metrics.appendEntriesReceived - before.appendEntriesReceived);
+      rates.votes += Math.max(0, votes - before.votesGranted - before.votesRejected);
+    }
 
-      const appendEntriesPerSec = Math.max(
-        0,
-        ((currentMetrics?.appendEntriesSent ?? 0) - (previousMetrics?.appendEntriesSent ?? 0)) / elapsedSeconds,
-      );
-
-      const requestVotePerSec = Math.max(
-        0,
-        (((currentMetrics?.votesGranted ?? 0) + (currentMetrics?.votesRejected ?? 0)) -
-          ((previousMetrics?.votesGranted ?? 0) + (previousMetrics?.votesRejected ?? 0))) / elapsedSeconds,
-      );
-
-      const representative = currentLeader ?? snapshot.nodes[0];
-
-      return {
-        name: new Date(snapshot.observedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        electionCount: (currentMetrics?.electionsWon ?? 0) + (currentMetrics?.electionsLost ?? 0),
-        rpcCount: totalRpc,
-        rpcDelta: Math.max(0, totalRpc - previousRpc),
-        appendEntriesPerSec,
-        requestVotePerSec,
-        snapshotCount: (currentMetrics?.snapshotsCreated ?? 0) + (currentMetrics?.snapshotsInstalled ?? 0),
-        replicationLatency: representative ? estimateReplicationLatency(representative, snapshot.summary.commitIndex) : 0,
-        heartbeatsPerSec,
-        nodeUptime: durationToMs(currentMetrics?.uptime) / 1000,
-      };
-    });
-  }, [history]);
+    return {
+      name: new Date(snapshot.observedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+      electionCount: reportedNodes ? totals.electionCount : null,
+      rpcCount: reportedNodes ? totals.rpcCount : null,
+      snapshotCount: reportedNodes ? totals.snapshotCount : null,
+      appendEntriesSent: comparedNodes ? rates.appendEntriesSent / elapsedSeconds : null,
+      appendEntriesReceived: comparedNodes ? rates.appendEntriesReceived / elapsedSeconds : null,
+      votesPerSec: comparedNodes ? rates.votes / elapsedSeconds : null,
+      nodeUptime: snapshot.summary.leaderId ? durationToMs(pickLeader(snapshot.nodes)?.health?.uptime) / 1000 : null,
+    };
+  }), [history]);
 
   const clusterStatusTone = cluster
     ? cluster.summary.status === "healthy"
@@ -593,21 +577,13 @@ export function DashboardApp() {
 
   const activeFaults = useMemo(() => {
     const faults: Array<{ id: string; label: string; detail: string }> = [];
-    cluster?.nodes.forEach((node, index) => {
+    cluster?.nodes.forEach((node) => {
       const chaos = node.chaos;
-      if (!chaos) {
+      if (!chaos?.enabled) {
         return;
       }
 
-      const nodeLabel = getNodeLabel(node, index);
-
-      if (chaos.enabled) {
-        faults.push({
-          id: `${node.health?.nodeId ?? node.baseUrl}-enabled`,
-          label: `Chaos enabled on ${nodeLabel}`,
-          detail: "The fault injector is active.",
-        });
-      }
+      const nodeLabel = getNodeLabel(node);
 
       if (chaos.packetDropProbability > 0) {
         faults.push({
@@ -636,8 +612,8 @@ export function DashboardApp() {
       Object.entries(chaos.nodes ?? {}).forEach(([nodeId, state]) => {
         if (state.crashed || state.disconnected) {
           faults.push({
-            id: `${nodeId}-state`,
-            label: nodeId,
+            id: `${node.baseUrl}-${nodeId}-state`,
+            label: `${nodeLabel} reports ${nodeId}`,
             detail: [state.crashed ? "crashed" : "", state.disconnected ? "disconnected" : ""].filter(Boolean).join(", "),
           });
         }
@@ -659,7 +635,7 @@ export function DashboardApp() {
     payload: Record<string, unknown> = {},
     nodeUrl?: string,
   ) {
-    if (!nodeUrl) {
+    if (action === "takeSnapshot" && !nodeUrl) {
       setNotice({ tone: "error", message: "No target node is available." });
       return;
     }
@@ -674,17 +650,19 @@ export function DashboardApp() {
 
       const data = (await response.json()) as SnapshotResponse | { success?: boolean; message?: string };
       if (!response.ok || (typeof data === "object" && data && "success" in data && data.success === false)) {
-        throw new Error("Action failed");
+        throw new Error("message" in data && data.message ? data.message : "Action failed.");
       }
 
-      setNotice({ tone: "success", message: `${actionLabel(action)} completed.` });
-      void refresh();
+      setNotice({ tone: "success", message: action === "takeSnapshot" && "snapshotIndex" in data
+        ? (data.snapshotIndex > 0 ? `Snapshot is available at index ${data.snapshotIndex}.` : "No committed entries are available to snapshot.")
+        : `${actionLabel(action)} completed.` });
     } catch (actionError) {
       setNotice({
         tone: "error",
         message: actionError instanceof Error ? actionError.message : "Action failed",
       });
     } finally {
+      refresh();
       setIsBusy(false);
     }
   }
@@ -696,13 +674,10 @@ export function DashboardApp() {
     sizeBytes: 0,
   };
 
-  const storageSummary = {
-    walEntries: selectedNode?.status?.logLength ?? 0,
-    snapshotSize: selectedNode?.status?.snapshot?.sizeBytes ?? 0,
-    stateEntries: Object.keys(selectedNode?.state ?? {}).length,
-  };
+  const stateEntryCount = Object.keys(selectedNode?.state ?? {}).length;
 
   return (
+    <MotionConfig reducedMotion="user">
     <div className="relative min-h-screen overflow-hidden text-slate-100">
       <div className="pointer-events-none absolute inset-0 grid-mask opacity-25" />
       <div className="pointer-events-none absolute left-[-10rem] top-[-8rem] h-[28rem] w-[28rem] rounded-full bg-cyan-500/10 blur-3xl" />
@@ -710,10 +685,11 @@ export function DashboardApp() {
 
       <div className="relative mx-auto flex min-h-screen max-w-[1800px] gap-6 px-4 py-4 lg:px-6">
         <Button
+          ref={menuButton}
           type="button"
           variant="outline"
           size="sm"
-          className="fixed left-4 top-4 z-50 rounded-full border-white/10 bg-slate-950/90 px-4 shadow-glow backdrop-blur-xl lg:left-6 lg:top-6"
+          className="fixed left-4 top-4 z-[60] rounded-full border-white/10 bg-slate-950/90 px-4 shadow-glow backdrop-blur-xl lg:left-6 lg:top-6"
           onClick={() => setIsSidebarOpen((current) => !current)}
           aria-expanded={isSidebarOpen}
           aria-controls="dashboard-sidebar"
@@ -742,7 +718,7 @@ export function DashboardApp() {
                 exit={{ x: -340, opacity: 0 }}
                 transition={{ type: "spring", stiffness: 280, damping: 32 }}
               >
-                <div className="glass flex h-full flex-col rounded-[2rem] border border-white/10 p-5 shadow-glow">
+                <div className="glass mt-12 flex max-h-[calc(100dvh-5rem)] flex-col overflow-y-auto rounded-[2rem] border border-white/10 p-5 shadow-glow">
                   <div className="flex items-center gap-3">
                     <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-400/15 text-emerald-300">
                       <Network className="h-5 w-5" />
@@ -753,7 +729,7 @@ export function DashboardApp() {
                     </div>
                   </div>
 
-                  <div className="mt-6 space-y-2">
+                  <nav aria-label="Dashboard sections" className="mt-6 space-y-2">
                     {SECTION_IDS.map((section) => (
                       <a
                         key={section}
@@ -765,7 +741,7 @@ export function DashboardApp() {
                         <ArrowUpRight className="h-4 w-4" />
                       </a>
                     ))}
-                  </div>
+                  </nav>
 
                   <div className="mt-6 rounded-2xl border border-white/8 bg-slate-950/70 p-4">
                     <div className="flex items-center justify-between text-xs uppercase tracking-[0.18em] text-slate-500">
@@ -788,7 +764,7 @@ export function DashboardApp() {
                       <span>{mode === "offline" ? "Waiting to reconnect" : "Polling every 2s"}</span>
                     </div>
                     <div className="mt-2 text-xs text-slate-500">
-                      {lastUpdatedAt ? `Last update ${formatShortDate(lastUpdatedAt)}` : "Waiting for the first cluster snapshot"}
+                      {lastUpdatedAt ? `Last update ${formatShortDate(lastUpdatedAt)}` : "Waiting for the first cluster sample"}
                     </div>
                   </div>
                 </div>
@@ -797,40 +773,38 @@ export function DashboardApp() {
           ) : null}
         </AnimatePresence>
 
-        <main className="min-w-0 flex-1 space-y-6">
-          <header id="overview" className="glass rounded-[2rem] border border-white/8 p-6 shadow-glow">
+        <main className="min-w-0 flex-1 space-y-6 pt-12">
+          <header id="overview" className="glass scroll-mt-16 rounded-[2rem] border border-white/8 p-4 shadow-glow sm:p-6">
             <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
               <div className="max-w-3xl space-y-4">
                 <div className="flex flex-wrap items-center gap-3">
                   <Badge className={clusterStatusTone}>
-                    {cluster ? cluster.summary.status : "loading"}
+                    {mode === "offline" ? "Feed offline" : cluster?.nodes.length ? cluster.summary.status : cluster ? "Setup required" : "Loading"}
                   </Badge>
-                  <Badge>Raft consensus</Badge>
-              <Badge>{cluster?.summary.leaderId ? `Leader ${cluster.summary.leaderId}` : "No leader yet"}</Badge>
+                  <Badge>{cluster?.summary.leaderId ? `Leader ${cluster.summary.leaderId}` : "No leader yet"}</Badge>
                 </div>
 
                 <div>
                   <h1 className="text-4xl font-semibold tracking-tight text-white md:text-5xl">
-                    RaftLab Cluster Command Center
+                    RaftLab Cluster Dashboard
                   </h1>
                   <p className="mt-3 max-w-2xl text-base leading-7 text-slate-400">
-                    Live topology, replicated state, chaos engineering, and snapshot control for the
-                    distributed system running underneath.
+                    Monitor Raft nodes, inspect replicated state, and test cluster recovery.
                   </p>
                 </div>
               </div>
 
               <div className="grid w-full gap-3 sm:grid-cols-2 xl:max-w-[420px]">
-                <Button variant="outline" onClick={() => void refresh()} disabled={isBusy}>
-                  {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                <Button variant="outline" onClick={refresh} disabled={isRefreshing}>
+                  {isRefreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                   Refresh
                 </Button>
                 <Button
                   onClick={() => {
-                    const leaderUrl = leader?.baseUrl ?? selectedNode?.baseUrl;
+                    const leaderUrl = leader?.baseUrl;
                     void postAction("takeSnapshot", {}, leaderUrl);
                   }}
-                  disabled={isBusy}
+                  disabled={isBusy || !canSnapshot}
                 >
                   <Database className="h-4 w-4" />
                   Take snapshot
@@ -838,11 +812,11 @@ export function DashboardApp() {
               </div>
             </div>
 
-            <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+            <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
               <StatusCard
                 icon={ShieldAlert}
                 label="Cluster status"
-                value={cluster?.summary.status ?? "Loading"}
+                value={mode === "offline" ? "Unavailable" : cluster?.nodes.length ? cluster.summary.status : cluster ? "Unconfigured" : "Loading"}
                 detail="Aggregated from all reachable management APIs"
                 accent="text-emerald-300"
               />
@@ -855,7 +829,7 @@ export function DashboardApp() {
               <StatusCard
                 icon={Gauge}
                 label="Healthy nodes"
-                value={String(cluster?.summary.healthyNodes ?? 0)}
+                value={cluster ? `${cluster.summary.healthyNodes}/${cluster.nodes.length}` : "—"}
                 detail={`${cluster?.summary.followers ?? 0} followers online`}
               />
               <StatusCard
@@ -872,9 +846,9 @@ export function DashboardApp() {
               />
               <StatusCard
                 icon={HeartPulse}
-                label="Cluster uptime"
+                label="Longest node uptime"
                 value={formatDuration(cluster?.summary.uptime)}
-                detail="Derived from the latest healthy leader snapshot"
+                detail="Across reachable nodes"
               />
             </div>
           </header>
@@ -882,7 +856,15 @@ export function DashboardApp() {
           {error ? (
             <Card className="border-rose-400/20 bg-rose-500/10">
               <CardContent className="py-6 text-rose-100">
-                Failed to load cluster state: {error}
+                <p role="status">{cluster ? `Refresh failed. Showing data from ${formatShortDate(lastUpdatedAt)}.` : "Cluster data could not be loaded."} {error}</p>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {cluster?.nodes.length === 0 ? (
+            <Card>
+              <CardContent className="pt-6 text-slate-300">
+                Set <code className="text-white">RAFTLAB_NODE_URLS</code> to the management API URLs, then restart the dashboard.
               </CardContent>
             </Card>
           ) : null}
@@ -890,39 +872,47 @@ export function DashboardApp() {
           <SectionCard
             id="topology"
             title="Live Cluster Topology"
-            description="A React Flow view of the cluster with role-aware colors and replication links."
+            description="Select a node to inspect its Raft state."
             action={
               <div className="flex items-center gap-2">
-                <Badge>Real-time</Badge>
                 <Badge>{cluster?.nodes.length ?? 0} nodes</Badge>
               </div>
             }
           >
-            <div className="h-[760px] overflow-hidden rounded-[1.75rem] border border-white/8 bg-slate-950/80">
-              {cluster ? (
+            <div className="h-[28rem] min-w-0 overflow-hidden sm:h-[38rem] xl:h-[44rem] rounded-[1.75rem] border border-white/8 bg-slate-950/80">
+              {cluster?.nodes.length ? (
                 <ReactFlow
                   nodes={flow.flowNodes}
                   edges={flow.flowEdges}
-                  nodeTypes={{ clusterNode: ClusterNodeView }}
+                  nodeTypes={nodeTypes}
+                  onNodeClick={(_, node) => setSelectedNodeId(node.id)}
+                  onSelectionChange={({ nodes }) => {
+                    if (nodes.length === 1) {
+                      setSelectedNodeId(nodes[0].id);
+                    }
+                  }}
+                  colorMode="dark"
+                  minZoom={0.15}
                   fitView
-                  fitViewOptions={{ padding: 0.32, minZoom: 0.5, maxZoom: 1.2 }}
+                  fitViewOptions={{ padding: 0.16, minZoom: 0.15, maxZoom: 1.1 }}
                   proOptions={{ hideAttribution: true }}
                   nodesDraggable={false}
                   nodesConnectable={false}
-                  elementsSelectable={false}
                 >
                   <Background color="rgba(148,163,184,0.12)" gap={28} />
                   <MiniMap zoomable pannable nodeStrokeWidth={3} nodeColor={(node) => nodeColor((node.data as ClusterNodeData).node)} />
                   <Controls />
                 </ReactFlow>
-              ) : (
+              ) : mode === "loading" ? (
                 <div className="flex h-full items-center justify-center p-8">
                   <div className="space-y-4 text-center">
                     <Skeleton className="mx-auto h-4 w-48" />
-                    <Skeleton className="mx-auto h-4 w-72" />
-                    <Skeleton className="mx-auto h-64 w-[700px] rounded-[2rem]" />
+                    <Skeleton className="mx-auto h-4 w-48 sm:w-72" />
+                    <Skeleton className="mx-auto h-48 w-52 max-w-full rounded-[2rem] sm:w-[28rem]" />
                   </div>
                 </div>
+              ) : (
+                <div className="flex h-full items-center justify-center p-8 text-slate-400">No topology data available.</div>
               )}
             </div>
           </SectionCard>
@@ -933,18 +923,18 @@ export function DashboardApp() {
             description="Inspect the persistent, volatile, snapshot, and storage state for any node."
             action={
               <div className="flex items-center gap-2">
-                <Select value={selectedNodeId} onChange={(event) => setSelectedNodeId(event.target.value)} className="w-[220px]">
-                  {cluster?.nodes.map((node, index) => (
-                    <option key={getNodeKey(node, index)} value={getNodeKey(node, index)}>
-                      {getNodeLabel(node, index)}
+                <Select aria-label="Inspect node" disabled={!selectedNode} value={selectedNode?.baseUrl ?? ""} onChange={(event) => setSelectedNodeId(event.target.value)} className="w-[220px]">
+                  {cluster?.nodes.map((node) => (
+                    <option key={node.baseUrl} value={node.baseUrl}>
+                      {getNodeLabel(node)}
                     </option>
                   ))}
                 </Select>
               </div>
             }
           >
-            {selectedNode ? (
-              <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+            {selectedNode?.status ? (
+              <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
                 <div className="grid gap-4 md:grid-cols-2">
                   <Card className="border-white/8 bg-white/[0.02]">
                     <CardHeader>
@@ -988,9 +978,9 @@ export function DashboardApp() {
                       <CardDescription>WAL and replicated state machine footprint.</CardDescription>
                     </CardHeader>
                     <CardContent className="grid gap-3">
-                      <InfoRow label="WAL entries" value={String(storageSummary.walEntries)} />
-                      <InfoRow label="State keys" value={String(storageSummary.stateEntries)} />
-                      <InfoRow label="Leader latency" value={`${selectedNode.latencyMs}ms`} />
+                      <InfoRow label="WAL entries" value={String(selectedNode.status.logLength)} />
+                      <InfoRow label="State keys" value={selectedNode.state ? String(stateEntryCount) : "Unavailable"} />
+                      <InfoRow label="Management API response" value={selectedNode.health ? `${selectedNode.latencyMs} ms` : "Unavailable"} />
                     </CardContent>
                   </Card>
                 </div>
@@ -1032,42 +1022,47 @@ export function DashboardApp() {
                   </CardContent>
                 </Card>
               </div>
-            ) : (
+            ) : mode === "loading" ? (
               <div className="grid gap-4 md:grid-cols-2">
                 <Skeleton className="h-44 rounded-[1.75rem]" />
                 <Skeleton className="h-44 rounded-[1.75rem]" />
                 <Skeleton className="h-44 rounded-[1.75rem]" />
                 <Skeleton className="h-44 rounded-[1.75rem]" />
               </div>
+            ) : (
+              <p className="text-sm text-slate-400">{selectedNode?.error ?? "No node details available."}</p>
             )}
           </SectionCard>
 
           <SectionCard
             id="state"
             title="Replicated State Machine"
-            description="Browse the full key-value store with search, table, and pretty JSON modes."
+            description={selectedNode ? `Key-value store on ${getNodeLabel(selectedNode)}.` : "Select a node to inspect its keys and values."}
             action={
               <div className="flex flex-wrap items-center gap-2">
                 <Input
+                  aria-label="Search keys or values"
                   placeholder="Search keys or values"
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
                   className="w-[220px]"
                 />
-                <Button variant={viewMode === "table" ? "default" : "outline"} size="sm" onClick={() => setViewMode("table")}>
+                <Button variant={viewMode === "table" ? "default" : "outline"} size="sm" aria-pressed={viewMode === "table"} onClick={() => setViewMode("table")}>
                   Table
                 </Button>
-                <Button variant={viewMode === "json" ? "default" : "outline"} size="sm" onClick={() => setViewMode("json")}>
+                <Button variant={viewMode === "json" ? "default" : "outline"} size="sm" aria-pressed={viewMode === "json"} onClick={() => setViewMode("json")}>
                   JSON
                 </Button>
-                <Button variant="outline" size="sm" onClick={() => void refresh()}>
+                <Button variant="outline" size="sm" onClick={refresh} disabled={isRefreshing}>
                   <RefreshCw className="h-4 w-4" />
                   Refresh
                 </Button>
               </div>
             }
           >
-            {viewMode === "table" ? (
+            {!selectedNode?.state ? (
+              <p className="text-sm text-slate-400">Replicated state is unavailable.</p>
+            ) : viewMode === "table" ? (
               <div className="rounded-[1.5rem] border border-white/8 bg-slate-950/70">
                 <Table>
                   <TableHeader>
@@ -1079,19 +1074,19 @@ export function DashboardApp() {
                   <TableBody>
                     {filteredStateEntries.map(([key, value]) => (
                       <TableRow key={key}>
-                        <TableCell className="font-medium text-white">{key}</TableCell>
-                        <TableCell className="whitespace-pre-wrap break-words font-mono text-xs text-slate-300">{value}</TableCell>
+                        <TableCell className="break-all font-medium text-white">{key}</TableCell>
+                        <TableCell className="whitespace-pre-wrap break-all font-mono text-xs text-slate-300">{value}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
                 </Table>
                 {filteredStateEntries.length === 0 ? (
-                  <div className="px-4 py-8 text-center text-sm text-slate-500">No keys matched the current search.</div>
+                  <div className="px-4 py-8 text-center text-sm text-slate-500">{search.trim() ? "No keys matched the current search." : "The store is empty."}</div>
                 ) : null}
               </div>
             ) : (
-              <pre className="overflow-auto rounded-[1.5rem] border border-white/8 bg-slate-950/80 p-5 text-xs leading-6 text-slate-200">
-                {JSON.stringify(selectedNode?.state ?? {}, null, 2)}
+              <pre tabIndex={0} className="max-h-96 overflow-auto rounded-[1.5rem] border border-white/8 bg-slate-950/80 p-5 text-xs leading-6 text-slate-200">
+                {JSON.stringify(Object.fromEntries(filteredStateEntries), null, 2)}
               </pre>
             )}
           </SectionCard>
@@ -1099,17 +1094,16 @@ export function DashboardApp() {
           <SectionCard
             id="metrics"
             title="Metrics Dashboard"
-            description="Chart the cluster&apos;s runtime counters, rates, and observed latency."
-            action={<Badge>Recharts</Badge>}
+            description="Election, replication, snapshot, and uptime samples."
           >
             <div className="grid gap-4 xl:grid-cols-2">
               <MetricChart
-                title="Election and RPC volume"
-                description="Cumulative election and RPC counts over time."
+                title="Elections and RPC activity"
+                description="Election outcomes, outgoing AppendEntries, and vote decisions on reachable nodes."
                 data={chartData}
                 lines={[
                   { key: "electionCount", label: "Elections", color: "#34d399" },
-                  { key: "rpcCount", label: "RPC count", color: "#38bdf8" },
+                  { key: "rpcCount", label: "AppendEntries sent + vote decisions", color: "#38bdf8" },
                 ]}
               />
               <MetricChart
@@ -1117,23 +1111,22 @@ export function DashboardApp() {
                 description="Approximate RPC rates derived from successive samples."
                 data={chartData}
                 lines={[
-                  { key: "appendEntriesPerSec", label: "AppendEntries/sec", color: "#a78bfa" },
-                  { key: "requestVotePerSec", label: "RequestVote/sec", color: "#f59e0b" },
-                  { key: "heartbeatsPerSec", label: "Heartbeats/sec", color: "#22d3ee" },
+                  { key: "appendEntriesSent", label: "AppendEntries sent/s", color: "#a78bfa" },
+                  { key: "votesPerSec", label: "Vote decisions/s", color: "#f59e0b" },
+                  { key: "appendEntriesReceived", label: "AppendEntries received/s", color: "#22d3ee" },
                 ]}
               />
               <MetricChart
-                title="Snapshots and latency"
-                description="Snapshot activity and estimated replication latency."
+                title="Snapshots"
+                description="Snapshots created by reachable nodes."
                 data={chartData}
                 lines={[
                   { key: "snapshotCount", label: "Snapshot count", color: "#34d399" },
-                  { key: "replicationLatency", label: "Replication latency", color: "#fb7185" },
                 ]}
               />
               <MetricChart
                 title="Node uptime"
-                description="Observed uptime in seconds for the selected leader sample."
+                description="Observed uptime of the current leader in seconds."
                 data={chartData}
                 lines={[
                   { key: "nodeUptime", label: "Uptime (s)", color: "#f472b6" },
@@ -1149,21 +1142,9 @@ export function DashboardApp() {
             action={<Badge>{events.length} events</Badge>}
           >
             <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
+              {events.length === 0 ? <p className="py-4 text-sm text-slate-400">Waiting for cluster activity.</p> : null}
               <AnimatePresence initial={false}>
-                {(events.length > 0
-                  ? events
-                  : [
-                      {
-                        id: "empty",
-                        type: "idle",
-                        title: "Waiting for activity",
-                        detail:
-                          "The live event stream will populate as the cluster changes.",
-                        severity: "info",
-                        time: new Date().toISOString(),
-                        nodeId: undefined,
-                      },
-                    ] as TimelineEvent[]).map((event) => (
+                {events.map((event) => (
                   <motion.div
                     key={event.id}
                     initial={{ opacity: 0, y: 12 }}
@@ -1193,7 +1174,7 @@ export function DashboardApp() {
                       </div>
                       <div className="mt-1 text-sm leading-6 text-slate-400">{event.detail}</div>
                     </div>
-                    <div className="shrink-0 text-xs text-slate-500">{formatShortDate(event.time)}</div>
+                    <div className="max-w-24 shrink-0 text-right text-xs text-slate-400">{formatShortDate(event.time)}</div>
                   </motion.div>
                 ))}
               </AnimatePresence>
@@ -1204,7 +1185,9 @@ export function DashboardApp() {
             id="chaos"
             title="Chaos Control"
             description="Enable, disable, and inject controlled faults from the management API."
-            action={<Badge>Active faults {activeFaults.length}</Badge>}
+            action={cluster?.nodes.length ? (
+              <Badge>Chaos enabled on {chaosEnabledCount}/{cluster.nodes.length} nodes</Badge>
+            ) : undefined}
           >
             <div className="grid gap-4 xl:grid-cols-[1fr_1.2fr]">
               <div className="space-y-4">
@@ -1214,15 +1197,15 @@ export function DashboardApp() {
                     <CardDescription>Chaos settings are applied to every configured node to keep the simulated cluster consistent.</CardDescription>
                   </CardHeader>
                   <CardContent className="grid gap-3 sm:grid-cols-3">
-                    <Button variant="default" onClick={() => void postAction("enableChaos", {}, chaosNode?.baseUrl)} disabled={isBusy}>
+                    <Button variant="default" onClick={() => void postAction("enableChaos")} disabled={isBusy || !canControl}>
                       <Zap className="h-4 w-4" />
                       Enable
                     </Button>
-                    <Button variant="outline" onClick={() => void postAction("disableChaos", {}, chaosNode?.baseUrl)} disabled={isBusy}>
+                    <Button variant="outline" onClick={() => void postAction("disableChaos")} disabled={isBusy || !canControl}>
                       <PlayCircle className="h-4 w-4" />
                       Disable
                     </Button>
-                    <Button variant="destructive" onClick={() => void postAction("resetChaos", {}, chaosNode?.baseUrl)} disabled={isBusy}>
+                    <Button variant="destructive" onClick={() => void postAction("resetChaos")} disabled={isBusy || !canControl}>
                       <ShieldAlert className="h-4 w-4" />
                       Reset
                     </Button>
@@ -1232,7 +1215,7 @@ export function DashboardApp() {
                 <Card className="border-white/8 bg-white/[0.02]">
                   <CardHeader>
                     <CardTitle>Injection mode</CardTitle>
-                    <CardDescription>Choose the fault you want to apply.</CardDescription>
+                    <CardDescription>Configured faults take effect when chaos is enabled.</CardDescription>
                   </CardHeader>
                   <CardContent className="grid gap-3">
                     <div className="grid grid-cols-2 gap-3">
@@ -1249,6 +1232,7 @@ export function DashboardApp() {
                             key={item.value}
                             type="button"
                             onClick={() => setFaultMode(item.value as FaultMode)}
+                            aria-pressed={active}
                             className={cn(
                               "rounded-2xl border px-4 py-3 text-left transition",
                               active
@@ -1256,7 +1240,7 @@ export function DashboardApp() {
                                 : "border-white/8 bg-white/[0.02] text-slate-300 hover:bg-white/[0.05]",
                             )}
                           >
-                            <Icon className="h-4 w-4" />
+                            <Icon className="h-4 w-4" aria-hidden="true" />
                             <div className="mt-2 text-sm font-medium">{item.label}</div>
                           </button>
                         );
@@ -1265,18 +1249,17 @@ export function DashboardApp() {
 
                     {faultMode === "latency" ? (
                       <div className="grid gap-3 sm:grid-cols-2">
-                        <Input value={minLatency} onChange={(event) => setMinLatency(event.target.value)} placeholder="Min latency ms" />
-                        <Input value={maxLatency} onChange={(event) => setMaxLatency(event.target.value)} placeholder="Max latency ms" />
+                        <label className="grid gap-1 text-sm">Minimum delay (ms)<Input type="number" min={0} step={1} value={minLatency} onChange={(event) => setMinLatency(event.target.value)} /></label>
+                        <label className="grid gap-1 text-sm">Maximum delay (ms)<Input type="number" min={0} step={1} value={maxLatency} onChange={(event) => setMaxLatency(event.target.value)} /></label>
                         <Button
                           className="sm:col-span-2"
                           onClick={() =>
                             void postAction(
                               "setLatency",
                               { minDelayMs: Number(minLatency), maxDelayMs: Number(maxLatency) },
-                              chaosNode?.baseUrl,
                             )
                           }
-                          disabled={isBusy}
+                          disabled={isBusy || !canControl || !validLatency}
                         >
                           Inject latency
                         </Button>
@@ -1285,12 +1268,12 @@ export function DashboardApp() {
 
                     {faultMode === "packetLoss" ? (
                       <div className="grid gap-3">
-                        <Input value={packetLoss} onChange={(event) => setPacketLoss(event.target.value)} placeholder="Packet loss percent" />
+                        <label className="grid gap-1 text-sm">Packet loss (%)<Input type="number" min={0} max={100} step="any" value={packetLoss} onChange={(event) => setPacketLoss(event.target.value)} /></label>
                         <Button
                           onClick={() =>
-                            void postAction("setPacketLoss", { probability: Number(packetLoss) / 100 }, chaosNode?.baseUrl)
+                            void postAction("setPacketLoss", { probability: Number(packetLoss) / 100 })
                           }
-                          disabled={isBusy}
+                          disabled={isBusy || !canControl || !validPacketLoss}
                         >
                           Inject packet loss
                         </Button>
@@ -1299,20 +1282,26 @@ export function DashboardApp() {
 
                     {faultMode === "partition" ? (
                       <div className="grid gap-3">
-                        <Input
-                          value={partitionGroups}
-                          onChange={(event) => setPartitionGroups(event.target.value)}
-                          placeholder="node1,node2 | node3,node4"
-                        />
+                        <label className="grid gap-1 text-sm">
+                          Partition groups
+                          <Input
+                            aria-describedby="partition-help"
+                            value={partitionGroups}
+                            onChange={(event) => setPartitionGroups(event.target.value)}
+                            placeholder={knownNodeIds.length > 1 ? `${knownNodeIds[0]} | ${knownNodeIds.slice(1).join(", ")}` : "node1 | node2"}
+                          />
+                        </label>
+                        <p id="partition-help" className="text-sm text-slate-400">
+                          Separate node IDs with commas and groups with |. Omitted nodes are isolated.
+                        </p>
                         <Button
                           onClick={() =>
                             void postAction(
                               "setPartition",
-                              { groups: partitionGroups.split("|").map((group) => group.split(",").map((value) => value.trim()).filter(Boolean)) },
-                              chaosNode?.baseUrl,
+                              { groups },
                             )
                           }
-                          disabled={isBusy}
+                          disabled={isBusy || !canControl || !validPartition}
                         >
                           Inject partition
                         </Button>
@@ -1321,7 +1310,15 @@ export function DashboardApp() {
 
                     {faultMode === "failure" ? (
                       <div className="grid gap-3">
-                        <Select value={failureMode} onChange={(event) => setFailureMode(event.target.value as FailureMode)}>
+                        <label className="grid gap-1 text-sm">
+                          Target node
+                          <Select value={targetNode?.baseUrl ?? ""} onChange={(event) => setTargetNodeId(event.target.value)}>
+                            {cluster?.nodes.filter((node) => node.nodeId).map((node) => (
+                              <option key={node.baseUrl} value={node.baseUrl}>{getNodeLabel(node)}</option>
+                            ))}
+                          </Select>
+                        </label>
+                        <Select aria-label="Node fault action" value={failureMode} onChange={(event) => setFailureMode(event.target.value as FailureMode)}>
                           <option value="crashNode">Crash node</option>
                           <option value="restartNode">Restart node</option>
                           <option value="disconnectNode">Disconnect node</option>
@@ -1330,11 +1327,11 @@ export function DashboardApp() {
                         <Button
                           variant="destructive"
                           onClick={() =>
-                            void postAction(failureMode, { nodeId: chaosNode?.health?.nodeId }, chaosNode?.baseUrl)
+                            void postAction(failureMode, { nodeId: targetNode?.nodeId })
                           }
-                          disabled={isBusy}
+                          disabled={isBusy || !canControl || !targetNode?.nodeId}
                         >
-                          Apply node fault
+                          {actionLabel(failureMode)}
                         </Button>
                       </div>
                     ) : null}
@@ -1348,7 +1345,12 @@ export function DashboardApp() {
                   <CardDescription>What the dashboard currently sees in the chaos controller.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  {(activeFaults.length > 0 ? activeFaults : [{ id: "none", label: "No active faults", detail: "The cluster is currently clean." }]).map((fault) => (
+                  {activeFaults.length === 0 ? (
+                    <p className="text-sm text-slate-400">
+                      {cluster?.nodes.some((node) => node.chaos) ? "No active faults reported." : "Chaos status is unavailable."}
+                    </p>
+                  ) : null}
+                  {activeFaults.map((fault) => (
                     <div key={fault.id} className="rounded-2xl border border-white/8 bg-slate-950/70 p-4">
                       <div className="font-medium text-white">{fault.label}</div>
                       <div className="mt-1 text-sm text-slate-400">{fault.detail}</div>
@@ -1363,7 +1365,6 @@ export function DashboardApp() {
             id="snapshot"
             title="Snapshot Management"
             description="Track the latest snapshot and trigger new compaction events from the leader."
-            action={<Badge>Snapshot aware</Badge>}
           >
             <div className="grid gap-4 xl:grid-cols-[1fr_0.9fr]">
               <Card className="border-white/8 bg-white/[0.02]">
@@ -1372,7 +1373,7 @@ export function DashboardApp() {
                   <CardDescription>The selected node&apos;s snapshot metadata.</CardDescription>
                 </CardHeader>
                 <CardContent className="grid gap-3 sm:grid-cols-2">
-                  <InfoRow label="Available" value={String(Boolean(snapshotInfo.available))} />
+                  <InfoRow label="Available" value={selectedNode?.status ? (snapshotInfo.available ? "Yes" : "No") : "Unknown"} />
                   <InfoRow label="Index" value={String(snapshotInfo.lastIncludedIndex)} />
                   <InfoRow label="Term" value={String(snapshotInfo.lastIncludedTerm)} />
                   <InfoRow label="Size" value={formatBytes(snapshotInfo.sizeBytes ?? 0)} />
@@ -1387,14 +1388,14 @@ export function DashboardApp() {
                 <CardContent className="space-y-3">
                   <Button
                     className="w-full"
-                    onClick={() => void postAction("takeSnapshot", {}, leader?.baseUrl ?? selectedNode?.baseUrl)}
-                    disabled={isBusy}
+                    onClick={() => void postAction("takeSnapshot", {}, leader?.baseUrl)}
+                    disabled={isBusy || !canSnapshot}
                   >
                     <Database className="h-4 w-4" />
                     Take Snapshot
                   </Button>
                   <div className="text-sm text-slate-400">
-                    This updates the WAL, the snapshot store, and the live status card once the cluster refreshes.
+                    {canSnapshot ? `Target: ${leader?.nodeId}` : "Waiting for a reachable leader."}
                   </div>
                 </CardContent>
               </Card>
@@ -1405,7 +1406,6 @@ export function DashboardApp() {
             id="health"
             title="Cluster Health"
             description="A node-by-node health table with latency and replication lag."
-            action={<Badge>Node health</Badge>}
           >
             <Table>
               <TableHeader>
@@ -1413,28 +1413,31 @@ export function DashboardApp() {
                   <TableHead>Node</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Role</TableHead>
-                  <TableHead>Latency</TableHead>
+                  <TableHead>API response</TableHead>
                   <TableHead>Connected peers</TableHead>
                   <TableHead>Replication lag</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-              {cluster?.nodes.map((node, index) => (
+              {cluster?.nodes.map((node) => (
                   <TableRow
-                    key={getNodeKey(node, index)}
-                    className="cursor-pointer transition hover:bg-white/[0.03]"
-                    onClick={() => setSelectedNodeId(getNodeKey(node, index))}
+                    key={node.baseUrl}
+                    className={cn(node.baseUrl === selectedNodeKey && "bg-white/[0.04]")}
                   >
-                    <TableCell className="font-medium text-white">{getNodeLabel(node, index)}</TableCell>
+                    <TableCell className="font-medium text-white">
+                      <a className="inline-flex whitespace-nowrap text-emerald-200 underline-offset-4 hover:underline" href="#node" onClick={() => setSelectedNodeId(node.baseUrl)}>
+                        {getNodeLabel(node)}
+                      </a>
+                    </TableCell>
                     <TableCell>
                       <Badge className={cn("border-white/10", healthTone(node.healthy))}>
                         {node.healthy ? "Healthy" : "Offline"}
                       </Badge>
                     </TableCell>
-                    <TableCell>{formatRole(node.health?.role ?? node.status?.role)}</TableCell>
-                    <TableCell>{node.latencyMs}ms</TableCell>
-                    <TableCell>{connectedPeers(node)}</TableCell>
-                    <TableCell>{replicationLag(node, cluster?.summary.commitIndex ?? 0)}</TableCell>
+                    <TableCell>{formatRole(node.healthy ? node.health?.role : "Offline")}</TableCell>
+                    <TableCell>{node.health ? `${node.latencyMs} ms` : "—"}</TableCell>
+                    <TableCell>{node.peers ? connectedPeers(node) : "—"}</TableCell>
+                    <TableCell>{node.healthy && leader?.status ? replicationLag(node, leader.status.commitIndex) : "—"}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -1446,11 +1449,12 @@ export function DashboardApp() {
       <AnimatePresence>
         {notice ? (
           <motion.div
+            role={notice.tone === "error" ? "alert" : "status"}
             initial={{ opacity: 0, y: 18 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 18 }}
             className={cn(
-              "fixed bottom-5 right-5 z-50 max-w-sm rounded-2xl border px-4 py-3 shadow-glow backdrop-blur-xl",
+              "fixed bottom-5 left-4 right-4 z-50 sm:left-auto sm:right-5 sm:max-w-sm rounded-2xl border px-4 py-3 shadow-glow backdrop-blur-xl",
               notice.tone === "success"
                 ? "border-emerald-400/30 bg-emerald-500/15 text-emerald-100"
                 : "border-rose-400/30 bg-rose-500/15 text-rose-100",
@@ -1472,6 +1476,7 @@ export function DashboardApp() {
         ) : null}
       </AnimatePresence>
     </div>
+    </MotionConfig>
   );
 }
 
@@ -1492,7 +1497,7 @@ function MetricChart({
 }: {
   title: string;
   description: string;
-  data: Array<Record<string, number | string>>;
+  data: Array<Record<string, number | string | null>>;
   lines: Array<{ key: string; label: string; color: string }>;
 }) {
   return (

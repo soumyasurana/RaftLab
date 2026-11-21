@@ -172,6 +172,64 @@ func TestRecoveryCatchesUpFromLeader(t *testing.T) {
 	}
 }
 
+func TestRestartedLeaderRecommitsLogWithoutClientWrites(t *testing.T) {
+	cfg := createTestConfig(t.TempDir())
+	node, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	node.handleElectionTimeout()
+	if err := node.Propose(statemachine.Command{Operation: statemachine.OpSet, Key: "key", Value: "value"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := node.Stop(); err != nil {
+		t.Fatal(err)
+	}
+
+	restarted, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = restarted.Stop() })
+	restarted.handleElectionTimeout()
+
+	if got, ok := restarted.StateMachineValue("key"); !ok || got != "value" {
+		t.Fatalf("recovered key = %q, present = %v", got, ok)
+	}
+	if got := restarted.CommitIndex(); got != 2 {
+		t.Fatalf("commit index = %d, want 2 (original write and leadership entry)", got)
+	}
+}
+
+func TestAppendEntriesCommitsOnlyMatchedPrefix(t *testing.T) {
+	node, err := New(createTestConfig(t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = node.Stop() })
+	matched, _ := (statemachine.Command{Operation: statemachine.OpSet, Key: "matched", Value: "yes"}).Encode()
+	divergent, _ := (statemachine.Command{Operation: statemachine.OpSet, Key: "divergent", Value: "unsafe"}).Encode()
+	if err := node.wal.AppendEntries([]types.LogEntry{
+		{Index: 1, Term: 1, Command: matched},
+		{Index: 2, Term: 1, Command: divergent},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	response, err := node.HandleAppendEntries(context.Background(), &pb.AppendEntriesRequest{
+		Term: 2, LeaderId: "node2", PrevLogIndex: 1, PrevLogTerm: 1, LeaderCommit: 2,
+	})
+	if err != nil || !response.GetSuccess() {
+		t.Fatalf("append response = %v, error = %v", response, err)
+	}
+	if got := node.CommitIndex(); got != 1 {
+		t.Fatalf("commit index = %d, want 1", got)
+	}
+	if _, ok := node.StateMachineValue("divergent"); ok {
+		t.Fatal("applied an entry outside the matched prefix")
+	}
+}
+
 // recovery idempotency (restart twice)
 func TestRecoveryIdempotency(t *testing.T) {
 	dir := t.TempDir()

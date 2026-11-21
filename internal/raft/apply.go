@@ -1,6 +1,10 @@
 package raft
 
-import "github.com/soumyasurana/RaftLab/internal/statemachine"
+import (
+	"fmt"
+
+	"github.com/soumyasurana/RaftLab/internal/statemachine"
+)
 
 // applyCommittedEntries applies every committed entry exactly once.
 //
@@ -21,7 +25,7 @@ func (n *Node) applyCommittedEntries() error {
 		}
 
 		if !ok {
-			break
+			return fmt.Errorf("missing committed log entry at index %d", nextIndex)
 		}
 
 		command, err := statemachine.Decode(entry.Command)

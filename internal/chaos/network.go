@@ -19,6 +19,12 @@ func (t *transport) Connect(peerID string, address string) error {
 }
 
 func (t *transport) Connected(peerID string) bool {
+	t.controller.mu.Lock()
+	blocked := t.controller.unreachableLocked(t.ownerID, types.NodeID(peerID)) != nil
+	t.controller.mu.Unlock()
+	if blocked {
+		return false
+	}
 	return t.base.Connected(peerID)
 }
 

@@ -213,28 +213,37 @@ func (c *Controller) ensureNodeLocked(nodeID types.NodeID) *nodeState {
 	return state
 }
 
-func (c *Controller) decisionLocked(ownerID, peerID types.NodeID) (time.Duration, error) {
+func (c *Controller) unreachableLocked(ownerID, peerID types.NodeID) error {
 	if !c.cfg.Enabled {
-		return 0, nil
+		return nil
 	}
 
 	ownerState := c.ensureNodeLocked(ownerID)
 	peerState := c.ensureNodeLocked(peerID)
 
 	if ownerState.crashed || peerState.crashed {
-		return 0, ErrCrashed
+		return ErrCrashed
 	}
 
 	if ownerState.disconnected || peerState.disconnected {
-		return 0, ErrDisconnected
+		return ErrDisconnected
 	}
 
 	for _, partition := range c.cfg.Partitions {
 		if !partitionAllows(partition, ownerID, peerID) {
-			return 0, ErrPartitioned
+			return ErrPartitioned
 		}
 	}
+	return nil
+}
 
+func (c *Controller) decisionLocked(ownerID, peerID types.NodeID) (time.Duration, error) {
+	if !c.cfg.Enabled {
+		return 0, nil
+	}
+	if err := c.unreachableLocked(ownerID, peerID); err != nil {
+		return 0, err
+	}
 	if c.cfg.PacketDropProbability > 0 &&
 		c.rng.Float64() < c.cfg.PacketDropProbability {
 		return 0, ErrDropped
@@ -248,9 +257,10 @@ func (c *Controller) decisionLocked(ownerID, peerID types.NodeID) (time.Duration
 	}
 
 	delay := c.cfg.MaxDelay
-	if c.cfg.MinDelay > 0 && c.cfg.MinDelay < c.cfg.MaxDelay {
-		jitter := c.rng.Int63n(int64(c.cfg.MaxDelay-c.cfg.MinDelay) + 1)
-		delay = c.cfg.MinDelay + time.Duration(jitter)
+	if minDelay := max(0, c.cfg.MinDelay); minDelay < c.cfg.MaxDelay {
+		span := c.cfg.MaxDelay - minDelay
+		// Use an exclusive upper bound to avoid overflow for large durations.
+		delay = minDelay + time.Duration(c.rng.Int63n(int64(span)))
 	}
 
 	return delay, nil

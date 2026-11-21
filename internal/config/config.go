@@ -29,7 +29,7 @@ type fileConfig struct {
 
 	DataDir string `yaml:"data_dir"`
 
-	SnapshotThreshold uint64 `yaml:"snapshot_threshold"`
+	SnapshotThreshold *uint64 `yaml:"snapshot_threshold"`
 
 	ElectionTimeout string `yaml:"election_timeout"`
 
@@ -64,10 +64,10 @@ func Load(path string) (*Config, error) {
 	cfg.Node.Address = raw.Address
 	cfg.Node.DataDir = raw.DataDir
 
-	if raw.SnapshotThreshold == 0 {
+	if raw.SnapshotThreshold == nil {
 		cfg.Node.SnapshotThreshold = DefaultSnapshotThreshold
 	} else {
-		cfg.Node.SnapshotThreshold = raw.SnapshotThreshold
+		cfg.Node.SnapshotThreshold = *raw.SnapshotThreshold
 	}
 
 	if raw.ElectionTimeout == "" {
@@ -122,6 +122,10 @@ func (c *Config) Validate() error {
 
 	if c.Node.DataDir == "" {
 		return errors.New("data directory is required")
+	}
+
+	if c.Node.HeartbeatTimeout <= 0 {
+		return errors.New("heartbeat timeout must be positive")
 	}
 
 	if c.Node.ElectionTimeout <= c.Node.HeartbeatTimeout {

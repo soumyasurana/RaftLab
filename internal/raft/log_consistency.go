@@ -1,6 +1,10 @@
 package raft
 
-import "github.com/soumyasurana/RaftLab/pkg/types"
+import (
+	"fmt"
+
+	"github.com/soumyasurana/RaftLab/pkg/types"
+)
 
 // resolveConflicts reconciles the follower log with the leader's log.
 // The caller must hold n.mu.
@@ -25,6 +29,9 @@ func (n *Node) resolveConflicts(
 
 		// Terms differ -> follower log diverged.
 		if localEntry.Term != incomingEntry.Term {
+			if uint64(incomingEntry.Index) <= n.volatile.CommitIndex {
+				return fmt.Errorf("log conflicts with committed entry at index %d", incomingEntry.Index)
+			}
 
 			if err := n.wal.TruncateAfter(
 				uint64(incomingEntry.Index - 1),

@@ -99,13 +99,7 @@ func getAndPrint(url string) {
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
-	var pretty bytes.Buffer
-	if err := json.Indent(&pretty, body, "", "  "); err == nil {
-		fmt.Println(pretty.String())
-	} else {
-		fmt.Println(string(body))
-	}
+	printResponse(resp)
 }
 
 func postAndPrint(url string, payload any) {
@@ -136,12 +130,30 @@ func postAndPrint(url string, payload any) {
 	}
 	defer resp.Body.Close()
 
-	resBody, _ := io.ReadAll(resp.Body)
+	printResponse(resp)
+}
+
+func printResponse(resp *http.Response) {
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Read HTTP response: %v\n", err)
+		os.Exit(1)
+	}
+	output := os.Stdout
+	failed := resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices
+	if failed {
+		output = os.Stderr
+		fmt.Fprintln(output, resp.Status)
+	}
+
 	var pretty bytes.Buffer
-	if err := json.Indent(&pretty, resBody, "", "  "); err == nil {
-		fmt.Println(pretty.String())
+	if err := json.Indent(&pretty, body, "", "  "); err == nil {
+		fmt.Fprintln(output, pretty.String())
 	} else {
-		fmt.Println(string(resBody))
+		fmt.Fprintln(output, string(body))
+	}
+	if failed {
+		os.Exit(1)
 	}
 }
 

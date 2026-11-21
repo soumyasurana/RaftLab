@@ -2,10 +2,14 @@ package raft
 
 import (
 	"context"
-	"log"
+	"fmt"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	pb "github.com/soumyasurana/RaftLab/internal/pb/raft"
 	"github.com/soumyasurana/RaftLab/internal/snapshot"
+	"github.com/soumyasurana/RaftLab/internal/statemachine"
 	"github.com/soumyasurana/RaftLab/pkg/types"
 )
 
@@ -16,6 +20,9 @@ func (n *Node) HandleRequestVote(
 ) (*pb.RequestVoteResponse, error) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
+	if n.stopped {
+		return nil, status.Error(codes.Unavailable, "node is stopped")
+	}
 
 	// Reject candidates from an older term.
 	if req.Term < n.persistent.CurrentTerm {
@@ -27,7 +34,9 @@ func (n *Node) HandleRequestVote(
 
 	// A newer term always causes this node to become a follower.
 	if req.Term > n.persistent.CurrentTerm {
-		n.becomeFollowerLocked(req.Term)
+		if err := n.becomeFollowerLocked(req.Term); err != nil {
+			return nil, err
+		}
 	}
 
 	lastLogIndex, lastLogTerm, err := n.lastLogInfoLocked()
@@ -53,8 +62,10 @@ func (n *Node) HandleRequestVote(
 	}
 
 	if voteGranted {
+		previousVote := n.persistent.VotedFor
 		n.persistent.VotedFor = types.NodeID(req.CandidateId)
 		if err := n.persistLocked(); err != nil {
+			n.persistent.VotedFor = previousVote
 			return nil, err
 		}
 
@@ -74,120 +85,88 @@ func (n *Node) HandleAppendEntries(
 ) (*pb.AppendEntriesResponse, error) {
 
 	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.stopped {
+		return nil, status.Error(codes.Unavailable, "node is stopped")
+	}
 	n.metrics.AppendEntriesRecv++
 
-	// Reject stale leaders.
+	rejected := &pb.AppendEntriesResponse{Term: n.persistent.CurrentTerm}
 	if req.Term < n.persistent.CurrentTerm {
-
-		response := &pb.AppendEntriesResponse{
-			Term:    n.persistent.CurrentTerm,
-			Success: false,
-		}
-
-		n.mu.Unlock()
-
-		return response, nil
+		return rejected, nil
 	}
 
-	defer n.electionTimer.reset()
-
-	// Update term / become follower.
-	if req.Term > n.persistent.CurrentTerm {
-		n.becomeFollowerLocked(req.Term)
-	} else if n.role != Follower {
-		n.role = Follower
+	if err := n.becomeFollowerLocked(req.Term); err != nil {
+		return nil, err
 	}
 	n.leaderID = types.NodeID(req.LeaderId)
+	n.electionTimer.reset()
+	rejected.Term = n.persistent.CurrentTerm
 
-	// Verify PrevLogIndex exists.
-	if req.PrevLogIndex > 0 {
-		if req.PrevLogIndex == n.volatile.LastIncludedIndex {
-			if req.PrevLogTerm != n.volatile.LastIncludedTerm {
-				response := &pb.AppendEntriesResponse{
-					Term:    n.persistent.CurrentTerm,
-					Success: false,
-				}
-				n.mu.Unlock()
-				return response, nil
-			}
-		} else {
-			entry, ok, err := n.wal.EntryAt(req.PrevLogIndex)
-			if err != nil {
-				n.mu.Unlock()
-				return nil, err
-			}
-
-			if !ok || uint64(entry.Term) != req.PrevLogTerm {
-				response := &pb.AppendEntriesResponse{
-					Term:    n.persistent.CurrentTerm,
-					Success: false,
-				}
-				n.mu.Unlock()
-				return response, nil
-			}
-		}
+	if req.PrevLogIndex < n.volatile.LastIncludedIndex {
+		return rejected, nil
 	}
-	if len(req.Entries) > 0 {
-
-		entries := protobufEntriesToLogEntries(req.Entries)
-
-		if err := n.resolveConflicts(entries); err != nil {
-			n.mu.Unlock()
-			return nil, err
+	if req.PrevLogIndex == n.volatile.LastIncludedIndex {
+		if req.PrevLogTerm != n.volatile.LastIncludedTerm {
+			return rejected, nil
 		}
-	}
-
-	if req.LeaderCommit > n.volatile.CommitIndex {
-		lastIndex, _, err := n.lastLogInfoLocked()
+	} else {
+		entry, ok, err := n.wal.EntryAt(req.PrevLogIndex)
 		if err != nil {
-			n.mu.Unlock()
 			return nil, err
 		}
-		if req.LeaderCommit < lastIndex {
-			n.volatile.CommitIndex = req.LeaderCommit
-		} else {
-			n.volatile.CommitIndex = lastIndex
+		if !ok || uint64(entry.Term) != req.PrevLogTerm {
+			return rejected, nil
 		}
+	}
+
+	matchedIndex := req.PrevLogIndex
+	for _, entry := range req.Entries {
+		if entry == nil || entry.Index != matchedIndex+1 {
+			return nil, status.Error(codes.InvalidArgument, "log entries must be contiguous")
+		}
+		matchedIndex = entry.Index
+	}
+	if err := n.resolveConflicts(protobufEntriesToLogEntries(req.Entries)); err != nil {
+		return nil, err
+	}
+
+	// Only commit the prefix confirmed by this RPC. The follower may still
+	// have divergent entries beyond it.
+	if commitIndex := min(req.LeaderCommit, matchedIndex); commitIndex > n.volatile.CommitIndex {
+		n.volatile.CommitIndex = commitIndex
+	}
+	if n.volatile.LastApplied < n.volatile.CommitIndex {
 		if err := n.applyCommittedEntries(); err != nil {
-			n.mu.Unlock()
 			return nil, err
 		}
 	}
 
-	response := &pb.AppendEntriesResponse{
-		Term:    n.persistent.CurrentTerm,
-		Success: true,
-	}
-
-	n.mu.Unlock()
-
-	return response, nil
+	return &pb.AppendEntriesResponse{Term: n.persistent.CurrentTerm, Success: true}, nil
 }
 
 // becomeFollowerLocked transitions the node to follower state.
 // The caller must hold n.mu.
-func (n *Node) becomeFollowerLocked(term uint64) {
-	wasLeader := n.role == Leader
-	wasCandidate := n.role == Candidate
+func (n *Node) becomeFollowerLocked(term uint64) error {
+	if term > n.persistent.CurrentTerm {
+		previous := n.persistent
+		n.persistent = PersistentState{CurrentTerm: term}
+		if err := n.persistLocked(); err != nil {
+			n.persistent = previous
+			return err
+		}
+		n.leaderID = ""
+	}
 
-	if n.heartbeat != nil {
+	switch n.role {
+	case Leader:
 		n.heartbeat.stop()
-	}
-	n.role = Follower
-	n.leaderID = ""
-	n.persistent.CurrentTerm = term
-	n.persistent.VotedFor = ""
-	if err := n.persistLocked(); err != nil {
-		log.Printf("persist metadata: %v", err)
-	}
-
-	if wasLeader {
 		n.metrics.LeaderChanges++
-	}
-
-	if wasCandidate {
+	case Candidate:
 		n.metrics.ElectionsLost++
 	}
+	n.role = Follower
+	return nil
 }
 
 // lastLogInfoLocked returns the index and term of the latest WAL entry.
@@ -218,33 +197,42 @@ func (n *Node) HandleInstallSnapshot(
 ) (*pb.InstallSnapshotResponse, error) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
+	if n.stopped {
+		return nil, status.Error(codes.Unavailable, "node is stopped")
+	}
 
-	// 1. Reply immediately if term < currentTerm
 	if req.Term < n.persistent.CurrentTerm {
 		return &pb.InstallSnapshotResponse{Term: n.persistent.CurrentTerm}, nil
 	}
-
-	n.electionTimer.reset()
-
-	if req.Term > n.persistent.CurrentTerm {
-		n.becomeFollowerLocked(req.Term)
-	} else if n.role != Follower {
-		n.role = Follower
-	}
-
-	// Save snapshot file, discard any existing or partial snapshot with a smaller index
-	if req.LastIncludedIndex <= n.volatile.LastIncludedIndex {
-		return &pb.InstallSnapshotResponse{Term: n.persistent.CurrentTerm}, nil
-	}
-
-	// Restore state machine
-	if err := n.stateMachine.Restore(req.Data); err != nil {
+	if err := n.becomeFollowerLocked(req.Term); err != nil {
 		return nil, err
 	}
+	n.leaderID = types.NodeID(req.LeaderId)
+	n.electionTimer.reset()
+	response := &pb.InstallSnapshotResponse{Term: n.persistent.CurrentTerm}
 
-	n.metrics.SnapshotsInstalled++
+	if req.LastIncludedIndex <= n.volatile.LastApplied {
+		return response, nil
+	}
 
-	// Update snapshot store
+	restored := statemachine.New()
+	if err := restored.Restore(req.Data); err != nil {
+		return nil, err
+	}
+	entry, ok, err := n.wal.EntryAt(req.LastIncludedIndex)
+	if err != nil {
+		return nil, err
+	}
+	if !ok || uint64(entry.Term) != req.LastIncludedTerm {
+		if req.LastIncludedIndex <= n.volatile.CommitIndex {
+			return nil, fmt.Errorf("snapshot conflicts with committed log at index %d", req.LastIncludedIndex)
+		}
+		// Keep the committed prefix recoverable if saving the snapshot fails.
+		if err := n.wal.TruncateAfter(n.volatile.CommitIndex); err != nil {
+			return nil, err
+		}
+	}
+
 	snap := snapshot.Snapshot{
 		LastIncludedIndex: req.LastIncludedIndex,
 		LastIncludedTerm:  req.LastIncludedTerm,
@@ -254,26 +242,15 @@ func (n *Node) HandleInstallSnapshot(
 		return nil, err
 	}
 
+	n.stateMachine = restored
 	n.volatile.LastIncludedIndex = req.LastIncludedIndex
 	n.volatile.LastIncludedTerm = req.LastIncludedTerm
+	n.volatile.LastApplied = req.LastIncludedIndex
+	n.volatile.CommitIndex = max(n.volatile.CommitIndex, req.LastIncludedIndex)
+	n.metrics.SnapshotsInstalled++
 
-	// If existing log entry has same index and term as snapshot's last included entry, retain log entries following it and reply
-	entry, ok, err := n.wal.EntryAt(req.LastIncludedIndex)
-	if err == nil && ok && uint64(entry.Term) == req.LastIncludedTerm {
-		_ = n.wal.TruncateBefore(req.LastIncludedIndex)
-	} else {
-		// Discard the entire log
-		// We can do this by just truncating after 0, but since the API doesn't fully support wiping and resetting index easily,
-		// we'll truncate after 0 (which removes everything). Wait, TruncateAfter(0) will keep entries <= 0, which is empty.
-		_ = n.wal.TruncateAfter(0)
+	if err := n.wal.TruncateBefore(req.LastIncludedIndex); err != nil {
+		return nil, err
 	}
-
-	if n.volatile.CommitIndex < req.LastIncludedIndex {
-		n.volatile.CommitIndex = req.LastIncludedIndex
-	}
-	if n.volatile.LastApplied < req.LastIncludedIndex {
-		n.volatile.LastApplied = req.LastIncludedIndex
-	}
-
-	return &pb.InstallSnapshotResponse{Term: n.persistent.CurrentTerm}, nil
+	return response, n.applyCommittedEntries()
 }

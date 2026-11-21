@@ -34,5 +34,7 @@ func (n *Node) LastApplied() uint64 {
 
 // StateMachineValue returns a key from the replicated state machine.
 func (n *Node) StateMachineValue(key string) (string, bool) {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
 	return n.stateMachine.Get(key)
 }

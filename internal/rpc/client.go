@@ -7,6 +7,7 @@ import (
 
 	pb "github.com/soumyasurana/RaftLab/internal/pb/raft"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
@@ -77,8 +78,8 @@ func (c *Client) Connected(peerID string) bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	_, ok := c.connections[peerID]
-	return ok
+	conn, ok := c.connections[peerID]
+	return ok && conn.GetState() == connectivity.Ready
 }
 
 // RequestVote sends a RequestVote RPC to a peer.

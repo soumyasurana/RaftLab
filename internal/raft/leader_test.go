@@ -116,7 +116,7 @@ func TestHandleAppendEntriesResponseMonotonicUpdates(t *testing.T) {
 		Term:    1,
 		Success: true,
 	}
-	node.handleAppendEntriesResponse("node2", resp, 0, 5)
+	node.handleAppendEntriesResponse("node2", 1, resp, 0, 5)
 
 	node.mu.RLock()
 	next := node.volatile.NextIndex["node2"]
@@ -128,7 +128,7 @@ func TestHandleAppendEntriesResponseMonotonicUpdates(t *testing.T) {
 	}
 
 	// Suppose an earlier response (entries 1..3: prevIndex = 0, replicated = 3) arrives late
-	node.handleAppendEntriesResponse("node2", resp, 0, 3)
+	node.handleAppendEntriesResponse("node2", 1, resp, 0, 3)
 
 	node.mu.RLock()
 	next = node.volatile.NextIndex["node2"]
@@ -138,5 +138,10 @@ func TestHandleAppendEntriesResponseMonotonicUpdates(t *testing.T) {
 	// Should not regress or falsely add
 	if match != 5 || next != 6 {
 		t.Fatalf("expected match=5, next=6 to remain monotonic, got match=%d, next=%d", match, next)
+	}
+
+	node.handleAppendEntriesResponse("node2", 1, &pb.AppendEntriesResponse{Term: 1}, 4, 0)
+	if got := node.volatile.NextIndex["node2"]; got != 6 {
+		t.Fatalf("stale rejection reduced next index to %d, want 6", got)
 	}
 }

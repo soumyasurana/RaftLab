@@ -5,7 +5,11 @@ export function Table({
   className,
   ...props
 }: React.TableHTMLAttributes<HTMLTableElement>) {
-  return <table className={cn("w-full caption-bottom text-sm", className)} {...props} />;
+  return (
+    <div className="max-w-full overflow-x-auto">
+      <table className={cn("w-full caption-bottom text-sm", className)} {...props} />
+    </div>
+  );
 }
 
 export function TableHeader({
@@ -44,7 +48,7 @@ export function TableHead({
   return (
     <th
       className={cn(
-        "h-12 px-4 text-left align-middle text-xs font-semibold uppercase tracking-[0.18em] text-slate-400",
+        "h-12 whitespace-nowrap px-4 text-left align-middle text-xs font-semibold uppercase tracking-[0.18em] text-slate-400",
         className,
       )}
       {...props}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	pb "github.com/soumyasurana/RaftLab/internal/pb/raft"
+	"github.com/soumyasurana/RaftLab/internal/statemachine"
 	"github.com/soumyasurana/RaftLab/pkg/types"
 )
 
@@ -16,17 +17,19 @@ const defaultVoteRPCTimeout = 200 * time.Millisecond
 func (n *Node) handleElectionTimeout() {
 	n.mu.Lock()
 
-	if n.role == Leader {
+	if n.role == Leader || n.stopped {
 		n.mu.Unlock()
 		return
 	}
 
+	previousRole, previousState := n.role, n.persistent
 	n.role = Candidate
 
 	n.persistent.CurrentTerm++
 	n.persistent.VotedFor = n.config.Node.ID
 
 	if err := n.persistLocked(); err != nil {
+		n.role, n.persistent = previousRole, previousState
 		n.mu.Unlock()
 		log.Printf(
 			"persist metadata: %v",
@@ -109,12 +112,19 @@ func (n *Node) handleElectionTimeout() {
 			}
 
 			n.mu.Lock()
+			if n.stopped {
+				n.mu.Unlock()
+				return
+			}
 
 			// A response from a newer term invalidates this election.
 			if response.Term > n.persistent.CurrentTerm {
-				n.becomeFollowerLocked(response.Term)
+				if err := n.becomeFollowerLocked(response.Term); err != nil {
+					log.Printf("persist newer term: %v", err)
+				} else {
+					n.electionTimer.reset()
+				}
 				n.mu.Unlock()
-				n.electionTimer.reset()
 				return
 			}
 
@@ -162,7 +172,7 @@ func (n *Node) becomeLeader(electionTerm uint64) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	if n.role != Candidate {
+	if n.role != Candidate || n.stopped {
 		return
 	}
 
@@ -170,16 +180,34 @@ func (n *Node) becomeLeader(electionTerm uint64) {
 		return
 	}
 
-	n.role = Leader
-	n.leaderID = n.config.Node.ID
-	n.metrics.ElectionsWon++
-	n.metrics.LeaderChanges++
-	lastIndex, _, err := n.lastLogInfoLocked()
+	lastIndex, lastTerm, err := n.lastLogInfoLocked()
 	if err != nil {
 		return
 	}
 
+	// A current-term entry lets a new leader commit an inherited log even
+	// when clients issue no new writes after a failover or restart.
+	if lastIndex > n.volatile.CommitIndex && lastTerm < electionTerm {
+		command, err := (statemachine.Command{Operation: statemachine.OpNoop}).Encode()
+		if err != nil {
+			return
+		}
+		if err := n.wal.Append(types.LogEntry{
+			Index:   types.LogIndex(lastIndex + 1),
+			Term:    types.Term(electionTerm),
+			Command: command,
+		}); err != nil {
+			log.Printf("append leadership no-op: %v", err)
+			return
+		}
+	}
+
+	n.role = Leader
+	n.leaderID = n.config.Node.ID
+	n.metrics.ElectionsWon++
+	n.metrics.LeaderChanges++
 	n.initializeLeaderState(lastIndex)
+	n.advanceCommitIndex()
 
 	log.Printf(
 		"node=%s became leader term=%d",
@@ -190,7 +218,5 @@ func (n *Node) becomeLeader(electionTerm uint64) {
 		n.config.Node.HeartbeatTimeout,
 	)
 
-	go n.runHeartbeats()
-
-	// Heartbeat scheduling and leader replication state added next.
+	go n.runHeartbeats(n.heartbeat, electionTerm)
 }

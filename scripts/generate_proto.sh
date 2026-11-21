@@ -2,6 +2,8 @@
 
 set -e
 
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
+
 protoc \
   -I proto \
   --go_out=internal/pb \

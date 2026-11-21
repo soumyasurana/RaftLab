@@ -2,10 +2,11 @@ package wal
 
 import (
 	"encoding/binary"
-	"github.com/soumyasurana/RaftLab/pkg/types"
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/soumyasurana/RaftLab/pkg/types"
 )
 
 type WAL struct {
@@ -65,6 +66,11 @@ func (w *WAL) readAllLocked() ([]types.LogEntry, error) {
 		return nil, err
 	}
 
+	info, err := w.segment.file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	remaining := info.Size()
 	var entries []types.LogEntry
 
 	for {
@@ -93,6 +99,10 @@ func (w *WAL) readAllLocked() ([]types.LogEntry, error) {
 			return nil, err
 		}
 
+		remaining -= 8 + int64(length)
+		if remaining < 0 {
+			return nil, io.ErrUnexpectedEOF
+		}
 		payload := make([]byte, length)
 
 		if _, err := io.ReadFull(
@@ -240,39 +250,10 @@ func (w *WAL) TruncateAfter(index uint64) error {
 		}
 	}
 
-	if err := w.segment.file.Close(); err != nil {
-		return err
+	if len(retained) == len(entries) {
+		return nil
 	}
-
-	file, err := os.OpenFile(
-		w.segment.path,
-		os.O_CREATE|
-			os.O_RDWR|
-			os.O_TRUNC|
-			os.O_APPEND,
-		0644,
-	)
-	if err != nil {
-		return err
-	}
-
-	w.segment.file = file
-
-	for _, entry := range retained {
-
-		record := FromLogEntry(entry)
-
-		data, err := record.MarshalBinary()
-		if err != nil {
-			return err
-		}
-
-		if err := w.segment.writeLocked(data); err != nil {
-			return err
-		}
-	}
-
-	return w.segment.syncLocked()
+	return w.replaceEntriesLocked(retained)
 }
 
 // AppendEntries appends multiple log entries.
@@ -306,35 +287,48 @@ func (w *WAL) TruncateBefore(index uint64) error {
 		}
 	}
 
-	if err := w.segment.file.Close(); err != nil {
-		return err
+	if len(retained) == len(entries) {
+		return nil
 	}
+	return w.replaceEntriesLocked(retained)
+}
 
-	file, err := os.OpenFile(
-		w.segment.path,
-		os.O_CREATE|
-			os.O_RDWR|
-			os.O_TRUNC|
-			os.O_APPEND,
-		0644,
-	)
+// replaceEntriesLocked builds and syncs a replacement before changing the live WAL.
+// The caller must hold w.segment.mu.
+func (w *WAL) replaceEntriesLocked(entries []types.LogEntry) error {
+	file, err := os.CreateTemp(filepath.Dir(w.segment.path), ".raft-wal-*")
 	if err != nil {
 		return err
 	}
+	defer os.Remove(file.Name())
+	defer file.Close()
 
-	w.segment.file = file
-
-	for _, entry := range retained {
+	replacement := Segment{file: file}
+	for _, entry := range entries {
 		record := FromLogEntry(entry)
 		data, err := record.MarshalBinary()
 		if err != nil {
 			return err
 		}
-
-		if err := w.segment.writeLocked(data); err != nil {
+		if err := replacement.writeLocked(data); err != nil {
 			return err
 		}
 	}
+	if err := file.Sync(); err != nil {
+		return err
+	}
+	// Open the replacement in append mode before swapping it into place.
+	appendFile, err := os.OpenFile(file.Name(), os.O_RDWR|os.O_APPEND, 0)
+	if err != nil {
+		return err
+	}
+	if err := os.Rename(file.Name(), w.segment.path); err != nil {
+		_ = appendFile.Close()
+		return err
+	}
 
-	return w.segment.syncLocked()
+	previous := w.segment.file
+	w.segment.file = appendFile
+	_ = previous.Close()
+	return nil
 }

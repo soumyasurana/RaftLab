@@ -1,7 +1,9 @@
 package raft
 
 import (
+	"errors"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/soumyasurana/RaftLab/internal/chaos"
@@ -11,6 +13,7 @@ import (
 	"github.com/soumyasurana/RaftLab/internal/statemachine"
 	"github.com/soumyasurana/RaftLab/internal/storage/metadata"
 	"github.com/soumyasurana/RaftLab/internal/storage/wal"
+	"github.com/soumyasurana/RaftLab/pkg/types"
 )
 
 func New(cfg *config.Config) (*Node, error) {
@@ -21,8 +24,8 @@ func NewWithTransport(
 	cfg *config.Config,
 	transport rpc.Transport,
 ) (*Node, error) {
-	walPath := envOrDefault("RAFT_WAL_PATH", cfg.Node.DataDir+"/raft.wal")
-	metadataPath := envOrDefault("RAFT_METADATA_PATH", cfg.Node.DataDir+"/metadata.json")
+	walPath := envOrDefault("RAFT_WAL_PATH", filepath.Join(cfg.Node.DataDir, "raft.wal"))
+	metadataPath := envOrDefault("RAFT_METADATA_PATH", filepath.Join(cfg.Node.DataDir, "metadata.json"))
 	snapshotDir := envOrDefault("RAFT_SNAPSHOT_DIR", cfg.Node.DataDir)
 
 	metaStore, err := metadata.Open(
@@ -44,9 +47,15 @@ func NewWithTransport(
 		return nil, err
 	}
 
+	keepWAL := false
+	defer func() {
+		if !keepWAL {
+			_ = log.Close()
+		}
+	}()
+
 	// Read WAL to ensure it's not corrupted
 	if _, err := log.ReadAll(); err != nil {
-		_ = log.Close()
 		return nil, err
 	}
 
@@ -65,6 +74,9 @@ func NewWithTransport(
 		}
 		lastIncludedIndex = snap.LastIncludedIndex
 		lastIncludedTerm = snap.LastIncludedTerm
+		if err := log.TruncateBefore(lastIncludedIndex); err != nil {
+			return nil, err
+		}
 	}
 
 	node := &Node{
@@ -91,7 +103,6 @@ func NewWithTransport(
 
 	// Replay committed entries
 	if err := node.applyCommittedEntries(); err != nil {
-		_ = log.Close()
 		return nil, err
 	}
 
@@ -113,7 +124,6 @@ func NewWithTransport(
 			peer.Address,
 		); err != nil {
 			_ = rpcClient.Close()
-			_ = log.Close()
 
 			return nil, err
 		}
@@ -130,38 +140,30 @@ func NewWithTransport(
 		cfg.Node.ElectionTimeout*2,
 	)
 
-	node.stopCh = make(chan struct{})
+	node.replicating = make(map[types.NodeID]uint64)
+	keepWAL = true
 
 	return node, nil
 }
 
 func (n *Node) Start() {
-	go n.electionTimer.run(n.handleElectionTimeout)
+	n.startOnce.Do(func() {
+		go n.electionTimer.run(n.handleElectionTimeout)
+	})
 }
 
 func (n *Node) Stop() error {
-	var walErr, rpcErr error
-
 	n.stopOnce.Do(func() {
+		n.mu.Lock()
+		n.stopped = true
 		n.electionTimer.stop()
+		n.heartbeat.stop()
+		n.mu.Unlock()
 
-		if n.heartbeat != nil {
-			n.heartbeat.stop()
-		}
-
-		close(n.stopCh)
-
-		if n.rpcClient != nil {
-			rpcErr = n.rpcClient.Close()
-		}
-		walErr = n.wal.Close()
+		n.stopErr = errors.Join(n.rpcClient.Close(), n.wal.Close())
 	})
 
-	if rpcErr != nil {
-		return rpcErr
-	}
-
-	return walErr
+	return n.stopErr
 }
 
 func envOrDefault(name string, fallback string) string {

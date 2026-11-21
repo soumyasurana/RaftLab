@@ -17,9 +17,14 @@ func (n *Node) Propose(cmd statemachine.Command) error {
 
 	n.mu.Lock()
 
-	if n.role != Leader {
+	if n.stopped || n.role != Leader {
 		n.mu.Unlock()
 		return ErrNotLeader
+	}
+
+	if err := cmd.Validate(); err != nil {
+		n.mu.Unlock()
+		return err
 	}
 
 	payload, err := cmd.Encode()
@@ -52,12 +57,10 @@ func (n *Node) Propose(cmd statemachine.Command) error {
 	}
 
 	n.advanceCommitIndex()
-
+	term := n.persistent.CurrentTerm
 	n.mu.Unlock()
 
-	for _, peer := range n.config.Node.Peers {
-		go n.replicateToPeer(string(peer.ID))
-	}
+	n.replicateToPeers(term)
 
 	return nil
 }

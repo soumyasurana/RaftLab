@@ -61,6 +61,9 @@ func (kv *KVStore) Restore(data []byte) error {
 		return err
 	}
 
+	if newData == nil {
+		newData = make(map[string]string)
+	}
 	kv.data = newData
 	return nil
 }

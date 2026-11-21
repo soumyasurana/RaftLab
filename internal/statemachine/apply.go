@@ -1,9 +1,11 @@
 package statemachine
 
-import "fmt"
-
 // Apply applies a replicated command.
 func (kv *KVStore) Apply(cmd Command) error {
+
+	if err := cmd.Validate(); err != nil {
+		return err
+	}
 
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
@@ -15,9 +17,9 @@ func (kv *KVStore) Apply(cmd Command) error {
 
 	case OpDelete:
 		delete(kv.data, cmd.Key)
+	case OpNoop:
+		// Leadership entries advance the log without modifying the store.
 
-	default:
-		return fmt.Errorf("unknown operation %d", cmd.Operation)
 	}
 
 	return nil

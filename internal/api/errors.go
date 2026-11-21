@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+
+	"github.com/gofiber/fiber/v3"
 )
 
 // APIError represents an HTTP error that should be rendered to clients.
@@ -55,7 +57,12 @@ func statusFromError(err error) int {
 		return apiErr.Status
 	}
 
-	if errors.Is(err, context.Canceled) {
+	var fiberErr *fiber.Error
+	if errors.As(err, &fiberErr) {
+		return fiberErr.Code
+	}
+
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return http.StatusRequestTimeout
 	}
 

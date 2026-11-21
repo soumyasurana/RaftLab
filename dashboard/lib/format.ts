@@ -13,15 +13,15 @@ export function formatDuration(value: string | number | undefined | null) {
     return "n/a";
   }
 
-  if (typeof value === "number") {
-    const ms = value / 1_000_000;
-    return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms.toFixed(0)}ms`;
-  }
-
-  if (/^\d+$/.test(value)) {
-    const ns = Number(value);
-    const ms = ns / 1_000_000;
-    return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms.toFixed(0)}ms`;
+  if (typeof value === "number" || /^\d+$/.test(value)) {
+    const ms = Number(value) / 1_000_000;
+    if (ms >= 3_600_000) {
+      return `${(ms / 3_600_000).toFixed(1)} h`;
+    }
+    if (ms >= 60_000) {
+      return `${(ms / 60_000).toFixed(1)} min`;
+    }
+    return ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${ms.toFixed(0)} ms`;
   }
 
   return value;

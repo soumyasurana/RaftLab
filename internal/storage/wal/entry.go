@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io"
 
 	"github.com/soumyasurana/RaftLab/pkg/types"
 )
@@ -81,16 +82,11 @@ func (e *Entry) UnmarshalBinary(data []byte) error {
 		return err
 	}
 
+	if uint64(commandLength) != uint64(reader.Len()) {
+		return fmt.Errorf("expected %d command bytes, got %d", commandLength, reader.Len())
+	}
+
 	e.Command = make([]byte, commandLength)
-
-	n, err := reader.Read(e.Command)
-	if err != nil {
-		return err
-	}
-
-	if uint32(n) != commandLength {
-		return fmt.Errorf("expected %d command bytes, read %d", commandLength, n)
-	}
-
-	return nil
+	_, err := io.ReadFull(reader, e.Command)
+	return err
 }

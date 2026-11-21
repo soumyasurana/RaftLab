@@ -123,6 +123,34 @@ func TestHandleInstallSnapshot(t *testing.T) {
 	}
 }
 
+func TestInstallSnapshotDoesNotRollBackAppliedState(t *testing.T) {
+	node, err := New(createSnapshotTestConfig(t.TempDir(), 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = node.Stop() })
+	node.handleElectionTimeout()
+	for _, value := range []string{"first", "latest"} {
+		if err := node.Propose(statemachine.Command{Operation: statemachine.OpSet, Key: "key", Value: value}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	_, err = node.HandleInstallSnapshot(context.Background(), &pb.InstallSnapshotRequest{
+		Term: 2, LeaderId: "node2", LastIncludedIndex: 1, LastIncludedTerm: 1,
+		Data: []byte("{\"key\":\"first\"}"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value, _ := node.StateMachineValue("key"); value != "latest" {
+		t.Fatalf("key = %q, want latest", value)
+	}
+	if got := node.LastApplied(); got != 2 {
+		t.Fatalf("last applied index = %d, want 2", got)
+	}
+}
+
 func TestRecoveryWithSnapshotAndWAL(t *testing.T) {
 	dir := t.TempDir()
 	cfg := createSnapshotTestConfig(dir, 10)

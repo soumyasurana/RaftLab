@@ -34,6 +34,9 @@ type Node struct {
 
 	stateMachine *statemachine.KVStore
 
-	stopCh   chan struct{}
-	stopOnce sync.Once
+	replicating map[types.NodeID]uint64
+	startOnce   sync.Once
+	stopOnce    sync.Once
+	stopped     bool
+	stopErr     error
 }

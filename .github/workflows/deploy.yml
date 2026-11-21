@@ -80,28 +80,41 @@ jobs:
           RAFT_IMAGE="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GAR_REPOSITORY}/raftlab:${IMAGE_TAG}"
           DASHBOARD_IMAGE="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GAR_REPOSITORY}/raftlab-dashboard:${IMAGE_TAG}"
           TARGET="${GCE_DEPLOY_USER}@${GCE_INSTANCE}"
-          RELEASE="/opt/raftlab/releases/${IMAGE_TAG}"
-          gcloud compute ssh "$TARGET" --zone "$GCE_ZONE" --tunnel-through-iap --command "sudo mkdir -p '$RELEASE'"
-          gcloud compute scp --recurse deployments/configs/docker "$TARGET:$RELEASE/configs" --zone "$GCE_ZONE" --tunnel-through-iap
-          gcloud compute scp deployments/docker-compose.production.yml deployments/Caddyfile "$TARGET:$RELEASE/" --zone "$GCE_ZONE" --tunnel-through-iap
+          STAGING=$(gcloud compute ssh "$TARGET" --zone "$GCE_ZONE" --tunnel-through-iap --command 'mktemp -d /tmp/raftlab-release.XXXXXXXX')
+          [[ "$STAGING" =~ ^/tmp/raftlab-release\.[[:alnum:]]{8}$ ]]
+          trap 'gcloud compute ssh "$TARGET" --zone "$GCE_ZONE" --tunnel-through-iap --command "rm -rf -- $STAGING" || true' EXIT
+          gcloud compute scp --recurse deployments/configs "$TARGET:$STAGING/" --zone "$GCE_ZONE" --tunnel-through-iap
+          gcloud compute scp deployments/docker-compose.production.yml deployments/Caddyfile "$TARGET:$STAGING/" --zone "$GCE_ZONE" --tunnel-through-iap
           RELEASE_ENV=$(printf 'RAFTLAB_IMAGE=%s\nDASHBOARD_IMAGE=%s\nIMAGE_TAG=%s\nCADDY_DOMAIN=%s\n' "$RAFT_IMAGE" "$DASHBOARD_IMAGE" "$IMAGE_TAG" "$CADDY_DOMAIN" | base64 -w0)
-          gcloud compute ssh "$TARGET" --zone "$GCE_ZONE" --tunnel-through-iap --command "sudo bash -s -- '$IMAGE_TAG' '$RELEASE_ENV'" <<'REMOTE'
+          gcloud compute ssh "$TARGET" --zone "$GCE_ZONE" --tunnel-through-iap --command "sudo bash -s -- '$IMAGE_TAG' '$RELEASE_ENV' '$STAGING'" <<'REMOTE'
           set -euo pipefail
-          tag="$1"; env_b64="$2"; release="/opt/raftlab/releases/$tag"; current="/opt/raftlab/current"
-          printf '%s' "$env_b64" | base64 -d | sudo tee "$release/.env" >/dev/null
-          sudo docker compose --env-file "$release/.env" -f "$release/docker-compose.production.yml" pull
+          tag="$1"; env_b64="$2"; staging="$3"; release="/opt/raftlab/releases/$tag"; current="/opt/raftlab/current"
+          mkdir -p "$release/configs/docker"
+          install -m 644 "$staging"/configs/docker/*.yaml "$release/configs/docker/"
+          install -m 644 "$staging/docker-compose.production.yml" "$staging/Caddyfile" "$release/"
+          printf '%s' "$env_b64" | base64 -d > "$release/.env"
+          docker compose --env-file "$release/.env" -f "$release/docker-compose.production.yml" pull
           previous=$(readlink -f "$current" || true)
-          sudo ln -sfn "$release" "$current"
-          if ! sudo docker compose --env-file "$current/.env" -f "$current/docker-compose.production.yml" up -d --remove-orphans; then
-            test -z "$previous" || sudo ln -sfn "$previous" "$current"
+          ln -sfn "$release" "$current"
+          compose() {
+            docker compose --env-file "$current/.env" -f "$current/docker-compose.production.yml" "$@"
+          }
+          cluster_healthy() {
+            for attempt in {1..10}; do
+              if compose exec -T dashboard node -e "fetch('http://localhost:3000/api/cluster', {signal:AbortSignal.timeout(5000)}).then(r=>r.ok?r.json():null).then(c=>process.exit(c?.summary?.status==='healthy'?0:1)).catch(()=>process.exit(1))"; then
+                return 0
+              fi
+              sleep 2
+            done
+            return 1
+          }
+          if ! compose up -d --remove-orphans --wait --wait-timeout 180 || ! cluster_healthy; then
+            compose ps --all || true
+            if [[ -n "$previous" && "$previous" != "$release" ]]; then
+              ln -sfn "$previous" "$current"
+              compose up -d --remove-orphans --wait --wait-timeout 180
+            fi
             exit 1
           fi
-          for i in $(seq 1 24); do
-            ids=$(sudo docker compose --env-file "$current/.env" -f "$current/docker-compose.production.yml" ps -q node1 node2 node3 node4 node5 dashboard)
-            unhealthy=$(sudo docker inspect $ids --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' | grep -v '^healthy$' || true)
-            test -z "$unhealthy" && break
-            sleep 5
-          done
-          sudo docker compose --env-file "$current/.env" -f "$current/docker-compose.production.yml" ps
-          sudo docker compose --env-file "$current/.env" -f "$current/docker-compose.production.yml" exec -T dashboard node -e "fetch('http://localhost:3000/api/cluster').then(r=>process.exit(r.ok?0:1))"
+          compose ps
           REMOTE

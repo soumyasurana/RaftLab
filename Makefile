@@ -1,10 +1,5 @@
-PROTO_DIR=proto/raft
-
 generate:
-	protoc \
-		--go_out=. \
-		--go-grpc_out=. \
-		$(PROTO_DIR)/raft.proto
+	bash scripts/generate_proto.sh
 
 fmt:
 	go fmt ./...

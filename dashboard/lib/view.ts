@@ -41,14 +41,9 @@ export function formatRole(role: string | undefined) {
   return role.slice(0, 1).toUpperCase() + role.slice(1).toLowerCase();
 }
 
-export function estimateReplicationLatency(node: NodeSnapshot, leaderCommit: number) {
-  const commitIndex = node.status?.commitIndex ?? 0;
-  const lagEntries = Math.max(0, leaderCommit - commitIndex);
-  return Math.max(node.latencyMs, lagEntries * 45);
-}
-
 export function pickLeader(nodes: NodeSnapshot[]) {
-  return nodes.find((node) => node.health?.role === "Leader") ?? nodes.find((node) => node.status?.role === "Leader");
+  const leaders = nodes.filter((node) => node.healthy && node.health?.role === "Leader");
+  return leaders.length === 1 ? leaders[0] : undefined;
 }
 
 function newestEvent(
@@ -92,15 +87,16 @@ export function deriveTimelineEvents(
   }
 
   current.nodes.forEach((node) => {
-    const prevNode = previous?.nodes.find((candidate) => candidate.health?.nodeId === node.health?.nodeId);
-    const nodeId = node.health?.nodeId ?? "unknown";
+    const prevNode = previous?.nodes.find((candidate) => candidate.baseUrl === node.baseUrl);
+    if (!prevNode) {
+      return;
+    }
+    const nodeId = node.nodeId ?? prevNode.nodeId ?? node.baseUrl;
 
     if (prevNode?.healthy && !node.healthy) {
       const offlineRole = prevNode.health?.role ?? prevNode.status?.role;
       const offlineTitle = offlineRole === "Leader" ? "Leader offline" : "Node offline";
-      events.push(
-        newestEvent("node-offline", offlineTitle, `Node ${nodeId} became unreachable.`, "critical", nodeId),
-      );
+      events.push(newestEvent("node-offline", offlineTitle, node.error ?? "Node became unreachable.", "critical", nodeId));
     }
 
     if (!prevNode?.healthy && node.healthy) {
@@ -124,7 +120,7 @@ export function deriveTimelineEvents(
       );
     }
 
-    if ((prevNode?.status?.snapshot?.lastIncludedIndex ?? 0) < (node.status?.snapshot?.lastIncludedIndex ?? 0)) {
+    if (prevNode.status && (prevNode.status.snapshot?.lastIncludedIndex ?? 0) < (node.status?.snapshot?.lastIncludedIndex ?? 0)) {
       events.push(
         newestEvent(
           "snapshot-created",
@@ -136,7 +132,7 @@ export function deriveTimelineEvents(
       );
     }
 
-    if ((prevNode?.metrics?.snapshotsInstalled ?? 0) < (node.metrics?.snapshotsInstalled ?? 0)) {
+    if (prevNode.metrics && prevNode.metrics.snapshotsInstalled < (node.metrics?.snapshotsInstalled ?? 0)) {
       events.push(
         newestEvent(
           "snapshot-installed",
@@ -158,23 +154,11 @@ export function deriveTimelineEvents(
       );
     }
 
-    if ((prevNode?.metrics?.appendEntriesSent ?? 0) < (node.metrics?.appendEntriesSent ?? 0)) {
-      events.push(
-        newestEvent(
-          "append-entries",
-          "AppendEntries",
-          `Leader sent ${node.metrics?.appendEntriesSent ?? 0} AppendEntries RPCs.`,
-          "info",
-          nodeId,
-        ),
-      );
-    }
-
-    if ((prevNode?.metrics?.rpcFailures ?? 0) < (node.metrics?.rpcFailures ?? 0)) {
+    if (prevNode.metrics && node.metrics && prevNode.metrics.rpcFailures < node.metrics.rpcFailures) {
       events.push(
         newestEvent(
           "rpc-failure",
-          "Heartbeat timeout",
+          "RPC failures",
           `RPC failures increased to ${node.metrics?.rpcFailures ?? 0}.`,
           "warning",
           nodeId,

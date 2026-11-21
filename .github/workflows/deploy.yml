@@ -1,3 +1,4 @@
+
 name: Deploy to Compute Engine
 
 on:
@@ -16,105 +17,216 @@ permissions:
   id-token: write
 
 env:
-  GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
-  GCP_REGION: ${{ vars.GCP_REGION }}
-  GAR_REPOSITORY: ${{ vars.GAR_REPOSITORY }}
-  GCE_INSTANCE: ${{ vars.GCE_INSTANCE }}
-  GCE_ZONE: ${{ vars.GCE_ZONE }}
-  GCE_DEPLOY_USER: ${{ vars.GCE_DEPLOY_USER }}
-  CADDY_DOMAIN: ${{ vars.CADDY_DOMAIN }}
+  GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  GCP_REGION: ${{ secrets.GCP_REGION }}
+  GAR_REPOSITORY: ${{ secrets.GAR_REPOSITORY }}
+  GCE_INSTANCE: ${{ secrets.GCE_INSTANCE }}
+  GCE_ZONE: ${{ secrets.GCE_ZONE }}
+  GCE_DEPLOY_USER: ${{ secrets.GCE_DEPLOY_USER }}
+  CADDY_DOMAIN: ${{ secrets.CADDY_DOMAIN }}
 
 jobs:
   deploy:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch' ||
+        (
+          github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.event == 'push'
+        )
+      }}
     name: Build and deploy
     runs-on: ubuntu-latest
     environment: production
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
 
       - name: Validate deployment configuration
+        env:
+          WIF_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
         run: |
-          test -n "$GCP_PROJECT_ID"
-          test -n "$GCP_REGION"
-          test -n "$GAR_REPOSITORY"
-          test -n "$GCE_INSTANCE"
-          test -n "$GCE_ZONE"
-          test -n "$GCE_DEPLOY_USER"
-          test -n "$CADDY_DOMAIN"
-          test -n "${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}"
-          test -n "${{ vars.GCP_SERVICE_ACCOUNT }}"
+          set -euo pipefail
 
-      - id: auth
-        name: Authenticate to Google Cloud
+          for name in \
+            GCP_PROJECT_ID \
+            GCP_REGION \
+            GAR_REPOSITORY \
+            GCE_INSTANCE \
+            GCE_ZONE \
+            GCE_DEPLOY_USER \
+            CADDY_DOMAIN \
+            WIF_PROVIDER \
+            SERVICE_ACCOUNT
+          do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing configuration: $name"
+              exit 1
+            fi
+          done
+
+          echo "Deployment configuration validated."
+
+      - name: Authenticate to Google Cloud
+        id: auth
         uses: google-github-actions/auth@v3
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
-          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2
 
       - name: Configure Artifact Registry authentication
-        run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
+        run: |
+          gcloud auth configure-docker \
+            "${GCP_REGION}-docker.pkg.dev" --quiet
 
       - name: Build and push images
         env:
           IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
-          RAFT_IMAGE="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GAR_REPOSITORY}/raftlab:${IMAGE_TAG}"
-          DASHBOARD_IMAGE="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GAR_REPOSITORY}/raftlab-dashboard:${IMAGE_TAG}"
-          docker build --file deployments/Dockerfile --tag "$RAFT_IMAGE" .
-          docker build --file dashboard/Dockerfile --tag "$DASHBOARD_IMAGE" .
+          set -euo pipefail
+
+          REGISTRY="${GCP_REGION}-docker.pkg.dev"
+          PREFIX="${REGISTRY}/${GCP_PROJECT_ID}/${GAR_REPOSITORY}"
+
+          RAFT_IMAGE="${PREFIX}/raftlab:${IMAGE_TAG}"
+          DASHBOARD_IMAGE="${PREFIX}/raftlab-dashboard:${IMAGE_TAG}"
+
+          docker build \
+            --file deployments/Dockerfile \
+            --tag "$RAFT_IMAGE" .
+
+          docker build \
+            --file dashboard/Dockerfile \
+            --tag "$DASHBOARD_IMAGE" .
+
           docker push "$RAFT_IMAGE"
           docker push "$DASHBOARD_IMAGE"
 
-      - name: Stage and deploy Compose release through IAP
+          echo "Images published for ${IMAGE_TAG}"
+
+      - name: Stage release through IAP
         env:
           IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
-          RAFT_IMAGE="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GAR_REPOSITORY}/raftlab:${IMAGE_TAG}"
-          DASHBOARD_IMAGE="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GAR_REPOSITORY}/raftlab-dashboard:${IMAGE_TAG}"
-          TARGET="${GCE_DEPLOY_USER}@${GCE_INSTANCE}"
-          STAGING=$(gcloud compute ssh "$TARGET" --zone "$GCE_ZONE" --tunnel-through-iap --command 'mktemp -d /tmp/raftlab-release.XXXXXXXX')
-          [[ "$STAGING" =~ ^/tmp/raftlab-release\.[[:alnum:]]{8}$ ]]
-          trap 'gcloud compute ssh "$TARGET" --zone "$GCE_ZONE" --tunnel-through-iap --command "rm -rf -- $STAGING" || true' EXIT
-          gcloud compute scp --recurse deployments/configs "$TARGET:$STAGING/" --zone "$GCE_ZONE" --tunnel-through-iap
-          gcloud compute scp deployments/docker-compose.production.yml deployments/Caddyfile "$TARGET:$STAGING/" --zone "$GCE_ZONE" --tunnel-through-iap
-          RELEASE_ENV=$(printf 'RAFTLAB_IMAGE=%s\nDASHBOARD_IMAGE=%s\nIMAGE_TAG=%s\nCADDY_DOMAIN=%s\n' "$RAFT_IMAGE" "$DASHBOARD_IMAGE" "$IMAGE_TAG" "$CADDY_DOMAIN" | base64 -w0)
-          gcloud compute ssh "$TARGET" --zone "$GCE_ZONE" --tunnel-through-iap --command "sudo bash -s -- '$IMAGE_TAG' '$RELEASE_ENV' '$STAGING'" <<'REMOTE'
           set -euo pipefail
-          tag="$1"; env_b64="$2"; staging="$3"; release="/opt/raftlab/releases/$tag"; current="/opt/raftlab/current"
+
+          REGISTRY="${GCP_REGION}-docker.pkg.dev"
+          PREFIX="${REGISTRY}/${GCP_PROJECT_ID}/${GAR_REPOSITORY}"
+
+          RAFT_IMAGE="${PREFIX}/raftlab:${IMAGE_TAG}"
+          DASHBOARD_IMAGE="${PREFIX}/raftlab-dashboard:${IMAGE_TAG}"
+
+          TARGET="${GCE_DEPLOY_USER}@${GCE_INSTANCE}"
+
+          SSH_ARGS=(
+            --zone "$GCE_ZONE"
+            --tunnel-through-iap
+            --quiet
+          )
+
+          STAGING=$(
+            gcloud compute ssh "$TARGET" \
+              "${SSH_ARGS[@]}" \
+              --command='mktemp -d /tmp/raftlab-release.XXXXXXXX'
+          )
+
+          [[ "$STAGING" =~ ^/tmp/raftlab-release\.[[:alnum:]]{8}$ ]]
+
+          cleanup() {
+            gcloud compute ssh "$TARGET" \
+              "${SSH_ARGS[@]}" \
+              --command="rm -rf -- '$STAGING'" || true
+          }
+          trap cleanup EXIT
+
+          gcloud compute scp --recurse \
+            deployments/configs \
+            "$TARGET:$STAGING/" \
+            "${SSH_ARGS[@]}"
+
+          gcloud compute scp \
+            deployments/docker-compose.production.yml \
+            deployments/Caddyfile \
+            "$TARGET:$STAGING/" \
+            "${SSH_ARGS[@]}"
+
+          RELEASE_ENV=$(
+            printf \
+              'RAFTLAB_IMAGE=%s\nDASHBOARD_IMAGE=%s\nIMAGE_TAG=%s\nCADDY_DOMAIN=%s\n' \
+              "$RAFT_IMAGE" \
+              "$DASHBOARD_IMAGE" \
+              "$IMAGE_TAG" \
+              "$CADDY_DOMAIN" | base64 -w0
+          )
+
+          gcloud compute ssh "$TARGET" \
+            "${SSH_ARGS[@]}" \
+            --command="sudo bash -s -- '$IMAGE_TAG' '$RELEASE_ENV' '$STAGING'" <<'REMOTE'
+          set -euo pipefail
+
+          tag="$1"
+          env_b64="$2"
+          staging="$3"
+
+          release="/opt/raftlab/releases/$tag"
+          current="/opt/raftlab/current"
+
           mkdir -p "$release/configs/docker"
-          install -m 644 "$staging"/configs/docker/*.yaml "$release/configs/docker/"
-          install -m 644 "$staging/docker-compose.production.yml" "$staging/Caddyfile" "$release/"
+
+          install -m 644 \
+            "$staging"/configs/docker/*.yaml \
+            "$release/configs/docker/"
+
+          install -m 644 \
+            "$staging/docker-compose.production.yml" \
+            "$staging/Caddyfile" \
+            "$release/"
+
           printf '%s' "$env_b64" | base64 -d > "$release/.env"
-          docker compose --env-file "$release/.env" -f "$release/docker-compose.production.yml" pull
-          previous=$(readlink -f "$current" || true)
-          ln -sfn "$release" "$current"
-          compose() {
-            docker compose --env-file "$current/.env" -f "$current/docker-compose.production.yml" "$@"
-          }
-          cluster_healthy() {
-            for attempt in {1..10}; do
-              if compose exec -T dashboard node -e "fetch('http://localhost:3000/api/cluster', {signal:AbortSignal.timeout(5000)}).then(r=>r.ok?r.json():null).then(c=>process.exit(c?.summary?.status==='healthy'?0:1)).catch(()=>process.exit(1))"; then
-                return 0
-              fi
-              sleep 2
-            done
-            return 1
-          }
-          if ! compose up -d --remove-orphans --wait --wait-timeout 180 || ! cluster_healthy; then
-            compose ps --all || true
-            if [[ -n "$previous" && "$previous" != "$release" ]]; then
-              ln -sfn "$previous" "$current"
-              compose up -d --remove-orphans --wait --wait-timeout 180
-            fi
+          chmod 600 "$release/.env"
+
+          # Pin the existing Compose project identity.
+          # Set this on the VM before deployment.
+          project_file="/opt/raftlab/compose-project"
+
+          if [[ ! -s "$project_file" ]]; then
+            echo "Missing $project_file"
+            echo "Identify the existing Compose project before deployment."
             exit 1
           fi
-          compose ps
+
+          project=$(cat "$project_file")
+
+          [[ "$project" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || exit 1
+
+          compose_release() {
+            docker compose \
+              -p "$project" \
+              --project-directory "$release" \
+              --env-file "$release/.env" \
+              -f "$release/docker-compose.production.yml" \
+              "$@"
+          }
+
+          # Verify registry access and download images.
+          # VM Docker authentication must be configured beforehand.
+          compose_release pull
+
+          # Validate the Compose configuration without restarting services.
+          compose_release config --quiet
+
+          # Do not automatically restart a live Raft cluster.
+          # The new no-op log entry requires a coordinated upgrade.
+          echo "Release staged successfully: $release"
+          echo "Images pulled and Compose configuration validated."
+          echo "Activation requires a coordinated Raft upgrade."
           REMOTE

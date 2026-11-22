@@ -58,10 +58,15 @@ services:
       timeout: 5s
       retries: 12
       start_period: 20s
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
-    ports: ["80:80", "443:443"]
+    dns:
+      - 169.254.169.254
+    ports:
+      - "80:80"
+      - "443:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
@@ -70,7 +75,9 @@ services:
       CADDY_DOMAIN: ${CADDY_DOMAIN:?CADDY_DOMAIN is required}
     networks: [raft-network]
     depends_on:
-      dashboard: { condition: service_healthy }
+      dashboard:
+        condition: service_healthy
+
 
 networks:
   raft-network:

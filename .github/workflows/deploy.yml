@@ -188,8 +188,7 @@ jobs:
               --command="rm -rf -- '$STAGING'" || true
           }
 
-          REMOTE_SCRIPT=$(mktemp)
-          trap 'rm -f "$REMOTE_SCRIPT"; cleanup' EXIT
+          trap cleanup EXIT
 
           echo "Uploading deployment configuration..."
 
@@ -201,6 +200,8 @@ jobs:
           gcloud compute scp \
             deployments/docker-compose.production.yml \
             deployments/Caddyfile \
+            deployments/deploy-production.sh \
+            deployments/production_checks.py \
             "$TARGET:$STAGING/" \
             "${SSH_ARGS[@]}"
 
@@ -213,212 +214,13 @@ jobs:
               "$CADDY_DOMAIN" | base64 -w0
           )
 
-          cat > "$REMOTE_SCRIPT" <<'REMOTE'
-          #!/usr/bin/env bash
-          set -euo pipefail
-
-          tag="$1"
-          env_b64="$2"
-          staging="$3"
-
-          [[ "$tag" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$staging" =~ ^/tmp/raftlab-release\.[A-Za-z0-9]{8}$ ]]
-
-          base="/opt/raftlab"
-          release="$base/releases/$tag"
-          project_file="$base/compose-project"
-          current="$base/current"
-
-          mkdir -p "$release/configs/docker"
-
-          install -m 644 \
-            "$staging"/configs/docker/*.yaml \
-            "$release/configs/docker/"
-
-          install -m 644 \
-            "$staging/docker-compose.production.yml" \
-            "$staging/Caddyfile" \
-            "$release/"
-
-          printf '%s' "$env_b64" | base64 -d > "$release/.env"
-          chmod 600 "$release/.env"
-
-          if [[ ! -s "$project_file" ]]; then
-            echo "ERROR: Missing Compose project identity."
-            exit 1
-          fi
-
-          project=$(cat "$project_file")
-
-          if [[ "$project" != "deployments" ]]; then
-            echo "ERROR: Unexpected Compose project: $project"
-            exit 1
-          fi
-
-          compose_new() {
-            docker compose \
-              -p "$project" \
-              --project-directory "$release" \
-              --env-file "$release/.env" \
-              -f "$release/docker-compose.production.yml" \
-              "$@"
-          }
-
-          echo "======================================"
-          echo "VALIDATING NEW RELEASE"
-          echo "======================================"
-
-          compose_new config --quiet
-
-          echo "Pulling all images before stopping old containers..."
-          compose_new pull
-
-          echo "======================================"
-          echo "STOPPING EXISTING RAFTLAB CLUSTER"
-          echo "======================================"
-
-          # First deployment may still use the original Compose
-          # configuration under /opt/raftlab/deployments.
-          # Discover the current Compose configuration from
-          # the labels of existing containers.
-
-          mapfile -t old_files < <(
-            docker ps -a \
-              --filter "label=com.docker.compose.project=$project" \
-              --format '{{.Label "com.docker.compose.project.config_files"}}' \
-              | tr ',' '\n' \
-              | sed '/^$/d' \
-              | sort -u
-          )
-
-          old_workdir=$(
-            docker ps -a \
-              --filter "label=com.docker.compose.project=$project" \
-              --format '{{.Label "com.docker.compose.project.working_dir"}}' \
-              | head -n 1
-          )
-
-          if (( ${#old_files[@]} > 0 )); then
-            echo "Existing Compose files:"
-            printf '%s\n' "${old_files[@]}"
-
-            old_args=()
-
-            for file in "${old_files[@]}"; do
-              if [[ ! -f "$file" ]]; then
-                echo "ERROR: Existing Compose file not found: $file"
-                exit 1
-              fi
-              old_args+=(-f "$file")
-            done
-
-            if [[ -n "$old_workdir" ]]; then
-              old_args=(--project-directory "$old_workdir" "${old_args[@]}")
-            fi
-
-            echo "Removing existing containers and volumes..."
-
-            docker compose \
-              -p "$project" \
-              "${old_args[@]}" \
-              down --volumes --remove-orphans
-
-          else
-            echo "No existing Compose containers found."
-          fi
-
-          echo "======================================"
-          echo "STARTING FRESH RAFTLAB CLUSTER"
-          echo "======================================"
-
-          compose_new up \
-            -d \
-            --force-recreate \
-            --remove-orphans
-
-          echo "======================================"
-          echo "VERIFYING DEPLOYMENT"
-          echo "======================================"
-
-          compose_new ps
-
-          expected_services=$(compose_new config --services | sort)
-          actual_services=$(compose_new ps --services --all | sort)
-
-          if [[ "$expected_services" != "$actual_services" ]]; then
-            echo "ERROR: Some expected services are missing."
-            echo "Expected:"
-            printf '%s\n' "$expected_services"
-            echo "Actual:"
-            printf '%s\n' "$actual_services"
-            exit 1
-          fi
-
-          echo "Waiting for containers to stabilize..."
-
-          sleep 20
-
-          compose_new ps
-
-          if compose_new ps --all --format json \
-            | python3 -c '
-          import json
-          import sys
-
-          raw = sys.stdin.read().strip()
-          if not raw:
-              sys.exit(1)
-
-          try:
-              data = json.loads(raw)
-              if isinstance(data, dict):
-                  data = [data]
-          except json.JSONDecodeError:
-              data = [json.loads(line) for line in raw.splitlines()]
-
-          if not data:
-              sys.exit(1)
-
-          for container in data:
-              name = container.get("Name", "unknown")
-              state = container.get("State", "")
-              health = container.get("Health", "")
-
-              print(f"{name}: state={state}, health={health}")
-
-              if state != "running":
-                  sys.exit(1)
-
-              if health and health != "healthy":
-                  sys.exit(1)
-          '; then
-            echo "Container state checks passed."
-          else
-            echo "ERROR: One or more containers failed validation."
-            exit 1
-          fi
-
-          ln -sfn "$release" "$base/current.next"
-          mv -Tf "$base/current.next" "$current"
-
-          echo "======================================"
-          echo "DEPLOYMENT SUCCESSFUL"
-          echo "======================================"
-          echo "Commit: $tag"
-          echo "Compose project: $project"
-          echo "Release: $release"
-          echo "Fresh cluster started successfully."
-          REMOTE
-
-          gcloud compute scp \
-            "$REMOTE_SCRIPT" \
-            "$TARGET:$STAGING/deploy.sh" \
-            "${SSH_ARGS[@]}"
-
           echo "Executing deployment on Compute Engine..."
 
-          gcloud compute ssh "$TARGET" \
+          if ! gcloud compute ssh "$TARGET" \
             "${SSH_ARGS[@]}" \
-            --command="sudo -n bash '$STAGING/deploy.sh' '$IMAGE_TAG' '$RELEASE_ENV' '$STAGING'"
+            --command="sudo -n bash '$STAGING/deploy-production.sh' '$IMAGE_TAG' '$RELEASE_ENV' '$STAGING'"; then
+            echo "::error file=deployments/deploy-production.sh::Production deployment failed for $IMAGE_TAG. Check the VM output for configuration, volume, startup, or Raft readiness errors."
+            exit 1
+          fi
 
           echo "RaftLab deployment completed successfully."

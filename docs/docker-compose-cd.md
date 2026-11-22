@@ -54,14 +54,17 @@ Create these GitHub repository variables: `GCP_PROJECT_ID`, `GCP_REGION`, `GAR_R
 
 ## Deploy and rollback
 
-A successful CI run on `main` starts **Deploy to Compute Engine**. The workflow copies only Compose/config assets, pulls commit-SHA images, replaces the `current` release symlink, waits for node/dashboard health, and tests `/api/cluster` internally.
+A successful CI run on `main` starts **Deploy to Compute Engine**. The workflow validates the rendered Compose file and pulls images before stopping the `deployments` project. Each release recreates all five Raft data volumes and retains `deployments_caddy-data` and `deployments_caddy-config`. Compose starts the dashboard after all five nodes are healthy, then starts Caddy after the dashboard is healthy.
 
-To deploy manually, run the workflow from the Actions page. To roll back on the VM, point `current` at an earlier release and restart Compose:
+The workflow advances `/opt/raftlab/current` after two consecutive checks confirm that all seven containers are running with zero restarts and all five nodes report the same leader and term. The deployment intentionally discards Raft state. To roll back the application version, revert the application changes on `main` while retaining the updated deployment workflow.
+
+To verify the active release on the VM:
 
 ```bash
-sudo ln -sfn /opt/raftlab/releases/COMMIT_SHA /opt/raftlab/current
-cd /opt/raftlab/current
-sudo docker compose --env-file .env -f docker-compose.production.yml up -d
+sudo sh -c 'cd /opt/raftlab/current && docker compose -p deployments --env-file .env -f docker-compose.production.yml ps --all'
+sudo sh -c 'cd /opt/raftlab/current && python3 production_checks.py ready --env-file .env -f docker-compose.production.yml'
 ```
 
-Use `sudo docker compose --env-file .env -f docker-compose.production.yml logs -f` for troubleshooting.
+From a client outside the VM, verify the public Caddy endpoint with `curl --fail --silent --show-error https://raftlab.blocklogsecurity.com/ -o /dev/null`.
+
+Use `sudo docker compose -p deployments --env-file .env -f docker-compose.production.yml logs -f` from the release directory for troubleshooting. Consult the Actions log for the path and diagnostics of a failed deployment.

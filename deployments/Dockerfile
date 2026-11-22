@@ -11,7 +11,7 @@ RUN CGO_ENABLED=0 go build -o /app/controller ./cmd/controller
 
 FROM alpine:latest
 WORKDIR /app
-RUN mkdir -p /app/data
+RUN apk add --no-cache wget && mkdir -p /app/data
 COPY --from=builder /app/node .
 COPY --from=builder /app/controller .
 
